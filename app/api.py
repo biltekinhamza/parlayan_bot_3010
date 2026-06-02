@@ -231,3 +231,20 @@ def get_global_portfolio():
         "daily_global": storage.get_daily_paper_stats(all_time=True),
         "open_trades_global": storage.get_open_paper_trades(all_time=True),
     }
+
+
+# ─── V4.2 Research / Velocity / Daily Integrity ──────────────────────────────
+
+@router.get("/api/research/fast-alerts")
+def get_fast_alerts(hours: int = 24, limit: int = 100):
+    return storage.get_fast_alerts(hours=hours, limit=limit)
+
+
+@router.get("/api/research/velocity")
+def get_velocity_report(hours: int = 24, limit: int = 100):
+    return storage.get_velocity_research_report(hours=hours, limit=limit)
+
+
+@router.get("/api/research/daily-report")
+def get_daily_report(day: str | None = None, all_time: bool = False):
+    return storage.get_daily_signal_report(day=day, all_time=all_time)

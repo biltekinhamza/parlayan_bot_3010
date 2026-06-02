@@ -1136,3 +1136,168 @@ def get_pump_detective_v2_report(threshold_pct: float = 30.0, limit: int = 100) 
         "summary": {bucket: summarize(items) for bucket, items in bucketed.items()},
         "rows": rows,
     }
+
+
+# ─── V4.2 Velocity / Paper Integrity Reports ─────────────────────────────────
+
+STRATEGY_VERSION = "professional_paper_v42"
+
+
+def patch_trade_context(trade_id: str, patch: dict[str, Any]) -> None:
+    """Trade context içine JSON patch ekler; eski kolon şemasını bozmadan yeni metrik tutar."""
+    db.execute(
+        """
+        UPDATE paper_trades
+        SET context = context || %s
+        WHERE id=%s
+        """,
+        (jsonb(patch or {}), trade_id),
+    )
+
+
+def get_velocity_leaderboard(minutes: int = 30, limit: int = 30) -> list[dict[str, Any]]:
+    rows = db.fetch_all(
+        """
+        SELECT DISTINCT ON (symbol)
+            symbol, ts, price, rsi, price_change_24h_pct,
+            price_change_5m_pct, price_change_15m_pct, price_change_30m_pct,
+            volume_ratio, parlayan_score, bot_state, extra
+        FROM market_snapshots
+        WHERE ts > now() - (%s || ' minutes')::interval
+        ORDER BY symbol, ts DESC
+        """,
+        (minutes,),
+    )
+    rows.sort(key=lambda r: float((r.get("extra") or {}).get("velocity_score") or 0), reverse=True)
+    return rows[:limit]
+
+
+def get_fast_alerts(hours: int = 24, limit: int = 100) -> list[dict[str, Any]]:
+    return db.fetch_all(
+        """
+        SELECT *
+        FROM signal_events
+        WHERE event_type='FAST_PUMP_ALERT'
+          AND ts > now() - (%s || ' hours')::interval
+        ORDER BY score DESC NULLS LAST, ts DESC
+        LIMIT %s
+        """,
+        (hours, limit),
+    )
+
+
+def get_daily_signal_report(day: str | None = None, all_time: bool = False) -> dict[str, Any]:
+    """
+    Günlük dürüst performans raporu:
+    - Sinyal sayısı
+    - Net PnL
+    - max runup/drawdown
+    - en iyi/kötü işlemler
+    - reject ve alert dağılımı
+    """
+    day_filter = "CURRENT_DATE" if not day else "%s::date"
+    day_params: tuple[Any, ...] = () if not day else (day,)
+
+    session_filter, session_params = _session_filter_sql(all_time=all_time)
+
+    trade_rows = db.fetch_all(
+        f"""
+        SELECT
+            symbol, strategy_version, entry_ts, exit_ts, status,
+            entry_price, exit_price, quote_size, exit_reason,
+            pnl_pct, pnl_quote, context,
+            COALESCE((context->>'gross_pnl_pct')::numeric, pnl_pct) AS gross_pnl_pct,
+            COALESCE((context->>'fee_pct')::numeric, 0) AS fee_pct,
+            COALESCE((context->>'total_slippage_pct')::numeric, slippage_pct_estimate) AS total_slippage_pct,
+            COALESCE((context->>'max_runup_pct')::numeric, 0) AS max_runup_pct,
+            COALESCE((context->>'max_drawdown_pct')::numeric, 0) AS max_drawdown_pct,
+            COALESCE((context->>'time_in_trade_min')::numeric, 0) AS time_in_trade_min
+        FROM paper_trades
+        WHERE entry_ts::date = {day_filter}
+          {session_filter}
+        ORDER BY entry_ts DESC
+        """,
+        (*day_params, *session_params),
+    )
+
+    summary = db.fetch_one(
+        f"""
+        SELECT
+            COUNT(*) AS trades,
+            COUNT(*) FILTER (WHERE status='CLOSED') AS closed_trades,
+            COUNT(*) FILTER (WHERE status='OPEN') AS open_trades,
+            COUNT(*) FILTER (WHERE status='CLOSED' AND pnl_pct > 0) AS wins,
+            COUNT(*) FILTER (WHERE status='CLOSED' AND pnl_pct <= 0) AS losses,
+            COALESCE(SUM(pnl_quote) FILTER (WHERE status='CLOSED'), 0) AS net_pnl_usdt,
+            COALESCE(AVG(pnl_pct) FILTER (WHERE status='CLOSED'), 0) AS avg_net_pnl_pct,
+            COALESCE(AVG((context->>'gross_pnl_pct')::numeric) FILTER (WHERE status='CLOSED'), 0) AS avg_gross_pnl_pct,
+            COALESCE(AVG((context->>'max_runup_pct')::numeric), 0) AS avg_max_runup_pct,
+            COALESCE(AVG((context->>'max_drawdown_pct')::numeric), 0) AS avg_max_drawdown_pct
+        FROM paper_trades
+        WHERE entry_ts::date = {day_filter}
+          {session_filter}
+        """,
+        (*day_params, *session_params),
+    )
+
+    signal_counts = db.fetch_all(
+        f"""
+        SELECT event_type, COUNT(*) AS count, COALESCE(AVG(score), 0) AS avg_score
+        FROM signal_events
+        WHERE ts::date = {day_filter}
+          {session_filter}
+        GROUP BY event_type
+        ORDER BY count DESC
+        """,
+        (*day_params, *session_params),
+    )
+
+    exit_counts = db.fetch_all(
+        f"""
+        SELECT exit_reason, COUNT(*) AS count, COALESCE(AVG(pnl_pct), 0) AS avg_pnl_pct, COALESCE(SUM(pnl_quote), 0) AS total_pnl_usdt
+        FROM paper_trades
+        WHERE status='CLOSED'
+          AND exit_ts::date = {day_filter}
+          {session_filter}
+        GROUP BY exit_reason
+        ORDER BY total_pnl_usdt DESC
+        """,
+        (*day_params, *session_params),
+    )
+
+    best = sorted([dict(r) for r in trade_rows if r.get("pnl_pct") is not None], key=lambda r: float(r.get("pnl_pct") or 0), reverse=True)[:10]
+    worst = sorted([dict(r) for r in trade_rows if r.get("pnl_pct") is not None], key=lambda r: float(r.get("pnl_pct") or 0))[:10]
+
+    return {
+        "version": "daily_signal_report_v42",
+        "day": day or "today",
+        "all_time": all_time,
+        "session": get_current_session(),
+        "summary": dict(summary) if summary else {},
+        "signal_counts": signal_counts,
+        "exit_counts": exit_counts,
+        "best_trades": best,
+        "worst_trades": worst,
+        "recent_trades": trade_rows[:50],
+    }
+
+
+def get_velocity_research_report(hours: int = 24, limit: int = 100) -> dict[str, Any]:
+    rows = db.fetch_all(
+        """
+        SELECT DISTINCT ON (symbol)
+            symbol, ts, price, rsi, volume_ratio, parlayan_score,
+            price_change_5m_pct, price_change_15m_pct, price_change_30m_pct,
+            price_change_24h_pct, bot_state, extra
+        FROM market_snapshots
+        WHERE ts > now() - (%s || ' hours')::interval
+        ORDER BY symbol, ts DESC
+        """,
+        (hours,),
+    )
+    rows = sorted(rows, key=lambda r: float((r.get("extra") or {}).get("velocity_score") or 0), reverse=True)[:limit]
+    return {
+        "version": "velocity_research_v42",
+        "hours": hours,
+        "rows": rows,
+    }

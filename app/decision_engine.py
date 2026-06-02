@@ -56,6 +56,10 @@ class DecisionEngine:
         pre_pump_score = _f(extra.get("pre_pump_score"), 0.0)
         market_phase = str(extra.get("market_phase") or "WATCH")
         v4_profile = str(extra.get("v4_profile") or "WATCH")
+        velocity_score = _f(extra.get("velocity_score"), 0.0)
+        fast_alarm_score = _f(extra.get("fast_alarm_score"), 0.0)
+        momentum_acceleration = _f(extra.get("momentum_acceleration"), 0.0)
+        price_velocity_1m = _f(extra.get("price_velocity_1m_pct"), 0.0)
 
         blocked_entry_phases = {"FOMO", "LATE_FOMO", "DANGER", "DISTRIBUTION"}
         watchable_phases = {
@@ -163,12 +167,26 @@ class DecisionEngine:
             and change_24h <= 22
         )
 
-        if not (momentum_entry or recovery_entry or volume_wakeup_entry):
+        # V4.2: GitHub pump detector fikirlerinden gelen hızlı alarm / velocity girişi.
+        # Bu profil tek başına rastgele pump kovalamaz; 24h/FOMO/risk filtreleri yine yukarıda geçerlidir.
+        velocity_entry = (
+            bool(extra.get("fast_alarm"))
+            and fast_alarm_score >= _f(parlayan_cfg.get("min_fast_alarm_score_for_entry"), 72.0)
+            and velocity_score >= _f(parlayan_cfg.get("min_velocity_score_for_entry"), 58.0)
+            and price_velocity_1m >= _f(parlayan_cfg.get("min_price_velocity_1m_for_entry"), 0.08)
+            and momentum_acceleration >= _f(parlayan_cfg.get("min_momentum_acceleration_for_entry"), 0.0)
+            and market_phase in {"VOLUME_WAKEUP", "EARLY_MOMENTUM", "ACCUMULATION_BREAKOUT", "MOMENTUM_EXPANSION"}
+            and 45 <= rsi <= 70
+            and change_24h <= min(max_24h_entry, 26.0)
+        )
+
+        if not (momentum_entry or recovery_entry or volume_wakeup_entry or velocity_entry):
             entry_reasons.append(
                 "v4 entry profili oluşmadı: "
                 f"faz={market_phase}, profile={v4_profile}, pre={pre_pump_score:.1f}, "
                 f"score={feature.parlayan_score:.1f}, rsi={rsi:.1f}, "
-                f"5m={change_5m:.2f}, 15m={change_15m:.2f}, 30m={change_30m:.2f}, 24h={change_24h:.2f}"
+                f"5m={change_5m:.2f}, 15m={change_15m:.2f}, 30m={change_30m:.2f}, 24h={change_24h:.2f}, "
+                f"velocity={velocity_score:.1f}, fast_alarm={fast_alarm_score:.1f}"
             )
 
         if entry_reasons:
@@ -183,7 +201,12 @@ class DecisionEngine:
                 "change_24h": change_24h,
             }
 
-        entry_profile = "MOMENTUM_ENTRY" if momentum_entry else "RECOVERY_ENTRY" if recovery_entry else "VOLUME_WAKEUP_ENTRY"
+        entry_profile = (
+            "VELOCITY_ALARM_ENTRY" if velocity_entry
+            else "MOMENTUM_ENTRY" if momentum_entry
+            else "RECOVERY_ENTRY" if recovery_entry
+            else "VOLUME_WAKEUP_ENTRY"
+        )
         return {
             "action": "PARLAYAN_ENTRY",
             "reasons": [
@@ -198,6 +221,8 @@ class DecisionEngine:
                 f"5m={change_5m:.2f}%",
                 f"15m={change_15m:.2f}%",
                 f"30m={change_30m:.2f}%",
+                f"velocity_score={velocity_score:.1f}",
+                f"fast_alarm_score={fast_alarm_score:.1f}",
             ],
             "entry_ok": True,
             "entry_profile": entry_profile,

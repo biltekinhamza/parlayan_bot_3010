@@ -165,3 +165,17 @@ parlayan_bot/
 Bu bot **paper trading** (simülasyon) modunda çalışır.
 Gerçek para yatırım kararlarınızda profesyonel danışman görüşü alın.
 Kripto para piyasaları yüksek risk içerir.
+
+
+## Professional Paper v4.2
+
+Yeni sürüm canlı emir göndermez. Eklenen başlıklar:
+
+- Velocity Engine
+- Fast Pump Alarm
+- Dürüst net paper PnL
+- Smart Trailing Ladder
+- Daily Signal Report
+- Velocity araştırma endpointleri
+
+Detay: `README_PROFESSIONAL_PAPER_V42.md`

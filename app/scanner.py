@@ -92,6 +92,31 @@ class ScannerService:
                             "volume_ratio": feature.volume_ratio,
                             "rsi": feature.rsi,
                             "spread_pct": feature.spread_pct,
+                            "velocity_score": extra.get("velocity_score"),
+                            "fast_alarm_score": extra.get("fast_alarm_score"),
+                        },
+                    )
+                if extra.get("fast_alarm"):
+                    storage.insert_signal_event(
+                        feature.symbol,
+                        "FAST_PUMP_ALERT",
+                        "WARNING" if float(extra.get("fast_alarm_score") or 0) >= 80 else "INFO",
+                        float(extra.get("fast_alarm_score") or 0),
+                        feature.price,
+                        {
+                            "fast_alarm_score": extra.get("fast_alarm_score"),
+                            "fast_alarm_reasons": extra.get("fast_alarm_reasons", []),
+                            "velocity_score": extra.get("velocity_score"),
+                            "velocity_delta": extra.get("velocity_delta"),
+                            "price_velocity_1m_pct": extra.get("price_velocity_1m_pct"),
+                            "price_velocity_5m_pct": extra.get("price_velocity_5m_pct"),
+                            "volume_velocity": extra.get("volume_velocity"),
+                            "trade_count_velocity": extra.get("trade_count_velocity"),
+                            "market_phase": extra.get("market_phase"),
+                            "parlayan_score": feature.parlayan_score,
+                            "pre_pump_score": extra.get("pre_pump_score"),
+                            "volume_ratio": feature.volume_ratio,
+                            "rsi": feature.rsi,
                         },
                     )
 

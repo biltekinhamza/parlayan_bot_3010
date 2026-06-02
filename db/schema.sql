@@ -1,5 +1,5 @@
 -- Parlayan Bot — Veritabanı Şeması
--- Hedef: Professional paper trading v4.1: self-honest risk, reject logging, Pump Detective v2
+-- Hedef: Professional paper trading v4.2: velocity alarms, self-honest risk, smart trailing, daily reports
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

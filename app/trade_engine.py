@@ -18,7 +18,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class TradeEngine:
     """
-    Professional paper trade engine v4.1.
+    Professional paper trade engine v4.2.
 
     Bu motor hâlâ gerçek emir göndermez. Amacı kendimizi kandırmayan paper-trade:
     - Eski session açık pozisyonları global riskte izler.
@@ -95,7 +95,7 @@ class TradeEngine:
         enriched_context.update({
             "raw_signal_price": price,
             "entry_fill_price": entry_fill_price,
-            "execution_model": "adverse_slippage_v4_1",
+            "execution_model": "adverse_slippage_v4_2",
             "slippage_details": slippage_details,
         })
 
@@ -212,11 +212,15 @@ class TradeEngine:
 
         state = dict(trade.get("protection_state") or {})
         protected_stop = _f(trade.get("protected_stop_price"), 0.0) or None
+        current_net_gain_pct = current_gain_pct - fee_pct
+        state["max_runup_pct"] = round(max(_f(state.get("max_runup_pct"), -999.0), max_gain_pct - fee_pct), 4)
+        state["max_drawdown_pct"] = round(min(_f(state.get("max_drawdown_pct"), 0.0), current_net_gain_pct), 4)
 
         if current_gain_pct >= take_profit_pct:
             exit_fill, fill_details = self._exit_fill(price, context, "TAKE_PROFIT")
             net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
             pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+            self._record_close_context(trade, exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
             storage.close_paper_trade(str(trade["id"]), exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt)
             storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "TAKE_PROFIT", "trade_id": str(trade["id"]), **fill_details})
             self._post_close(symbol, "TAKE_PROFIT", net_pnl, trade)
@@ -242,6 +246,12 @@ class TradeEngine:
             state["trailing_stop"] = round(protected_stop, 8)
             state["trailing_gap_pct"] = trailing_gap_pct
 
+        ladder_stop, ladder_state = self._smart_trailing_ladder(entry, max_gain_pct, fee_pct, context, cfg)
+        if ladder_stop is not None and (protected_stop is None or ladder_stop > protected_stop):
+            protected_stop = ladder_stop
+            state.update(ladder_state)
+            state["smart_ladder_active"] = True
+
         entry_ts = trade.get("entry_ts")
         age_minutes = 0.0
         if isinstance(entry_ts, datetime):
@@ -265,6 +275,7 @@ class TradeEngine:
             exit_fill, fill_details = self._exit_fill(reference, context, reason)
             net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
             pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+            self._record_close_context(trade, exit_fill, reason, net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
             storage.close_paper_trade(str(trade["id"]), exit_fill, reason, net_pnl, pnl_usdt)
             storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {
                 "reason": reason,
@@ -287,9 +298,85 @@ class TradeEngine:
             exit_fill, fill_details = self._exit_fill(price, context, "MAX_TIME_EXIT")
             net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
             pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+            self._record_close_context(trade, exit_fill, "MAX_TIME_EXIT", net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
             storage.close_paper_trade(str(trade["id"]), exit_fill, "MAX_TIME_EXIT", net_pnl, pnl_usdt)
             storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "MAX_TIME_EXIT", "trade_id": str(trade["id"]), **fill_details})
             self._post_close(symbol, "MAX_TIME_EXIT", net_pnl, trade)
+
+    def _smart_trailing_ladder(
+        self,
+        entry: float,
+        max_gain_pct: float,
+        fee_pct: float,
+        context: dict[str, Any],
+        cfg: dict[str, Any],
+    ) -> tuple[float | None, dict[str, Any]]:
+        """
+        V4.2 kademeli kâr koruma merdiveni:
+        +3.5% -> break-even, +5 -> +2, +8 -> +4, +12 -> +7, +15 -> sıkı trailing.
+        Değerler config ile değiştirilebilir.
+        """
+        ladder = self.config.get("smart_trailing_ladder") or [
+            {"runup_pct": 3.5, "lock_pct": 0.0, "label": "break_even"},
+            {"runup_pct": 5.0, "lock_pct": 2.0, "label": "lock_2"},
+            {"runup_pct": 8.0, "lock_pct": 4.0, "label": "lock_4"},
+            {"runup_pct": 12.0, "lock_pct": 7.0, "label": "lock_7"},
+            {"runup_pct": 15.0, "lock_pct": 10.0, "label": "tight_trailing"},
+        ]
+        best: dict[str, Any] | None = None
+        for step in ladder:
+            if max_gain_pct >= _f(step.get("runup_pct")):
+                if best is None or _f(step.get("lock_pct")) > _f(best.get("lock_pct")):
+                    best = step
+        if best is None:
+            return None, {}
+        lock_pct = _f(best.get("lock_pct"))
+        # fee'yi korumak için kilit stop'a round-trip fee ekle.
+        stop_price = entry * (1 + (lock_pct + fee_pct) / 100)
+        return stop_price, {
+            "smart_ladder_step": best.get("label"),
+            "smart_ladder_runup_pct": _f(best.get("runup_pct")),
+            "smart_ladder_lock_pct": lock_pct,
+            "smart_ladder_stop": round(stop_price, 8),
+        }
+
+    def _record_close_context(
+        self,
+        trade: dict[str, Any],
+        exit_fill: float,
+        reason: str,
+        net_pnl: float,
+        pnl_usdt: float,
+        fee_pct: float,
+        fill_details: dict[str, Any],
+        state: dict[str, Any],
+        now: datetime,
+    ) -> None:
+        entry = _f(trade.get("entry_price"))
+        gross_pnl_pct = ((exit_fill - entry) / entry * 100) if entry > 0 else 0.0
+        entry_slippage = _f((trade.get("context") or {}).get("slippage_details", {}).get("entry_slippage_pct"), _f(trade.get("slippage_pct_estimate")))
+        exit_slippage = _f(fill_details.get("exit_slippage_pct"))
+        entry_ts = trade.get("entry_ts")
+        time_in_trade_min = 0.0
+        if isinstance(entry_ts, datetime):
+            if entry_ts.tzinfo is None:
+                entry_ts = entry_ts.replace(tzinfo=timezone.utc)
+            time_in_trade_min = max((now - entry_ts).total_seconds() / 60.0, 0.0)
+        storage.patch_trade_context(str(trade["id"]), {
+            "exit_fill_price": exit_fill,
+            "exit_reason": reason,
+            "gross_pnl_pct": round(gross_pnl_pct, 5),
+            "fee_pct": round(fee_pct, 5),
+            "entry_slippage_pct": round(entry_slippage, 5),
+            "exit_slippage_pct": round(exit_slippage, 5),
+            "total_slippage_pct": round(entry_slippage + exit_slippage, 5),
+            "net_pnl_pct": round(net_pnl, 5),
+            "net_pnl_usdt": round(pnl_usdt, 5),
+            "max_runup_pct": state.get("max_runup_pct"),
+            "max_drawdown_pct": state.get("max_drawdown_pct"),
+            "time_in_trade_min": round(time_in_trade_min, 2),
+            "paper_integrity_model": "net_pnl_after_fill_fee_slippage_v4_2",
+        })
 
     def _phase_stop_loss_pct(self, trade: dict[str, Any], context: dict[str, Any], cfg: dict[str, Any]) -> float:
         base = _f(trade.get("stop_loss_pct"), _f(cfg.get("stop_loss_pct"), 2.5))

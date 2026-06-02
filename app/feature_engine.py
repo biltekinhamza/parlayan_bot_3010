@@ -9,6 +9,7 @@ from .indicators import clamp, kline_features, safe_float, spread_pct_from_book
 from .models import MarketFeature, SymbolInfo
 from . import storage
 from .professional_metrics import compute_pre_pump_metrics
+from .velocity_engine import compute_velocity_metrics
 
 
 def _filter_map(filters: list[dict[str, Any]]) -> dict[str, Any]:
@@ -160,6 +161,7 @@ class FeatureEngine:
 
         preview_feature = type("PreviewFeature", (), {})()
         preview_feature.symbol = symbol
+        preview_feature.ts = now
         preview_feature.price = price
         preview_feature.rsi = rsi
         preview_feature.price_change_24h_pct = price_change_24h
@@ -177,6 +179,7 @@ class FeatureEngine:
         preview_feature.wick_body_ratio = wick_body_ratio
 
         previous_snapshot = storage.get_latest_market_snapshot(symbol)
+        velocity_metrics = compute_velocity_metrics(preview_feature, previous_snapshot)
         professional_metrics = compute_pre_pump_metrics(preview_feature, previous_snapshot)
 
         return MarketFeature(
@@ -202,6 +205,7 @@ class FeatureEngine:
                 "price_change_1h_pct": kf.get("price_change_1h_pct"),
                 "price_change_4h_pct": kf.get("price_change_4h_pct"),
                 "interval": interval,
+                **velocity_metrics,
                 **professional_metrics,
             },
         )
