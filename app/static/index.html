@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parlayan Bot</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+    --red: #f85149; --yellow: #d29922; --blue: #58a6ff;
+    --orange: #ff8c00; --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+
+  /* Header */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  .logo { font-size: 18px; font-weight: 700; color: var(--orange); }
+  .logo span { color: var(--text); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .status-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .dot.on { background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .btn { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: all .15s; }
+  .btn-green { background: rgba(63,185,80,.15); border-color: var(--green); color: var(--green); }
+  .btn-green:hover { background: rgba(63,185,80,.3); }
+  .btn-red { background: rgba(248,81,73,.15); border-color: var(--red); color: var(--red); }
+  .btn-red:hover { background: rgba(248,81,73,.3); }
+  .btn-blue { background: rgba(88,166,255,.15); border-color: var(--blue); color: var(--blue); }
+  .btn-blue:hover { background: rgba(88,166,255,.3); }
+
+  /* Layout */
+  .main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+
+  /* Stat cards */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .stat-value { font-size: 22px; font-weight: 700; }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red { color: var(--red); }
+  .stat-value.yellow { color: var(--yellow); }
+  .stat-value.blue { color: var(--blue); }
+  .stat-value.orange { color: var(--orange); }
+  .stat-sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab { padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent;
+    color: var(--muted); font-size: 13px; font-weight: 500; transition: all .15s; }
+  .tab.active { color: var(--text); border-bottom-color: var(--orange); }
+  .tab:hover:not(.active) { color: var(--text); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Tables */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .table-header { padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; }
+  .table-title { font-weight: 600; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { padding: 10px 12px; text-align: left; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border);
+    white-space: nowrap; }
+  td { padding: 9px 12px; border-bottom: 1px solid rgba(48,54,61,.5); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .symbol { font-weight: 600; color: var(--blue); }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .neutral { color: var(--muted); }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge-watch { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .badge-entered { background: rgba(88,166,255,.15); color: var(--blue); }
+  .badge-closed { background: rgba(48,54,61,.5); color: var(--muted); }
+  .badge-expired { background: rgba(48,54,61,.3); color: var(--muted); font-style: italic; }
+  .badge-open { background: rgba(88,166,255,.15); color: var(--blue); }
+  .badge-win { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge-loss { background: rgba(248,81,73,.15); color: var(--red); }
+  .score-bar { display: flex; align-items: center; gap: 6px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--border); width: 60px; flex-shrink: 0; }
+  .bar-fill { height: 100%; border-radius: 2px; }
+
+  /* Empty */
+  .empty { text-align: center; padding: 40px; color: var(--muted); }
+
+  /* Events */
+  .event-list { max-height: 500px; overflow-y: auto; }
+  .event-item { padding: 8px 16px; border-bottom: 1px solid rgba(48,54,61,.5);
+    display: flex; gap: 12px; align-items: flex-start; font-size: 12px; }
+  .event-level { padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
+    flex-shrink: 0; margin-top: 1px; }
+  .level-INFO { background: rgba(88,166,255,.15); color: var(--blue); }
+  .level-WARNING { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .level-ERROR { background: rgba(248,81,73,.15); color: var(--red); }
+  .event-ts { color: var(--muted); flex-shrink: 0; }
+  .event-msg { flex: 1; color: var(--text); }
+
+  /* Loading */
+  .loading { text-align: center; padding: 20px; color: var(--muted); }
+
+  /* Grid */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media(max-width:900px) { .grid-2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">🔥 Parlayan Bot <span>Günlük Hareket Eden Coinler</span></div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <div class="status-badge">
+      <div class="dot" id="dot"></div>
+      <span id="status-text">Bağlanıyor...</span>
+    </div>
+    <button class="btn btn-green" onclick="startScanner()">▶ Başlat</button>
+    <button class="btn btn-red" onclick="stopScanner()">■ Durdur</button>
+    <button class="btn btn-blue" onclick="scanNow()">⚡ Tara</button>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- Stat Cards -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Açık İşlemler</div>
+      <div class="stat-value blue" id="s-open">—</div>
+      <div class="stat-sub">max 5</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Toplam İşlem</div>
+      <div class="stat-value" id="s-total">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Kazanan</div>
+      <div class="stat-value green" id="s-wins">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Kaybeden</div>
+      <div class="stat-value red" id="s-losses">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Ort. PnL</div>
+      <div class="stat-value" id="s-avg-pnl">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Toplam PnL (USDT)</div>
+      <div class="stat-value" id="s-total-pnl">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">En İyi İşlem</div>
+      <div class="stat-value green" id="s-best">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">İzleme Listesi</div>
+      <div class="stat-value orange" id="s-watching">—</div>
+      <div class="stat-sub">aktif aday</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Session</div>
+      <div class="stat-value blue" id="s-session">v3</div>
+      <div class="stat-sub" id="s-session-sub">yeni oturum</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('tab-parlayan')">🔥 Parlayan Adaylar</div>
+    <div class="tab" onclick="showTab('tab-gainers')">📈 Günün Yükselleri</div>
+    <div class="tab" onclick="showTab('tab-open')">💼 Açık İşlemler</div>
+    <div class="tab" onclick="showTab('tab-history')">📋 İşlem Geçmişi</div>
+    <div class="tab" onclick="showTab('tab-market')">🌐 Piyasa</div>
+    <div class="tab" onclick="showTab('tab-events')">📡 Olaylar</div>
+  </div>
+
+  <!-- Parlayan Adaylar -->
+  <div class="tab-content active" id="tab-parlayan">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">🔥 Aktif Parlayan Adaylar</div>
+        <div style="font-size:11px;color:var(--muted)">Her 2 dakikada güncellenir</div>
+      </div>
+      <div id="candidates-table"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+  <!-- Günün Yükselleri -->
+  <div class="tab-content" id="tab-gainers">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">📈 Bugün Tespit Edilen En İyi Parlayan Coinler</div>
+      </div>
+      <div id="gainers-table"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+  <!-- Açık İşlemler -->
+  <div class="tab-content" id="tab-open">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">💼 Açık İşlemler</div>
+      </div>
+      <div id="open-trades-table"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+  <!-- İşlem Geçmişi -->
+  <div class="tab-content" id="tab-history">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">📋 Son 30 İşlem (Aktif Session)</div>
+      </div>
+      <div id="history-table"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+  <!-- Piyasa -->
+  <div class="tab-content" id="tab-market">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">🌐 Son Tarama — Parlayan Sıralaması</div>
+      </div>
+      <div id="market-table"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+  <!-- Olaylar -->
+  <div class="tab-content" id="tab-events">
+    <div class="table-wrap">
+      <div class="table-header">
+        <div class="table-title">📡 Bot Olayları</div>
+      </div>
+      <div class="event-list" id="events-list"><div class="loading">Yükleniyor...</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d=2) => v == null ? '—' : (+v).toFixed(d);
+const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + (+v).toFixed(2) + '%';
+const fmtTs = ts => ts ? new Date(ts).toLocaleString('tr-TR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '—';
+const pctClass = v => v > 0 ? 'pos' : v < 0 ? 'neg' : 'neutral';
+
+function showTab(id) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', t.onclick.toString().includes(id)));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === id));
+  // Lazy load
+  if (id === 'tab-gainers') loadGainers();
+  if (id === 'tab-market') loadMarket();
+  if (id === 'tab-events') loadEvents();
+}
+
+// Skor rengi
+function scoreColor(score) {
+  if (score >= 70) return '#3fb950';
+  if (score >= 50) return '#d29922';
+  if (score >= 30) return '#58a6ff';
+  return '#8b949e';
+}
+
+function scoreBar(score) {
+  const color = scoreColor(score);
+  return `<div class="score-bar">
+    <div class="bar"><div class="bar-fill" style="width:${Math.min(score,100)}%;background:${color}"></div></div>
+    <span style="color:${color};font-weight:600">${fmt(score,1)}</span>
+  </div>`;
+}
+
+// ─── Status ─────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status').then(r=>r.json());
+    const running = r.running;
+    $('dot').className = 'dot' + (running ? ' on' : '');
+    $('status-text').textContent = running ? 'Tarama aktif' : 'Durduruldu';
+  } catch(e) {
+    $('status-text').textContent = 'Bağlantı hatası';
+  }
+}
+
+// ─── Stats ──────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const s = await fetch('/api/trades/summary').then(r=>r.json());
+    $('s-open').textContent = s.open_trades ?? '0';
+    $('s-total').textContent = s.closed_trades ?? '0';
+    $('s-wins').textContent = s.wins ?? '0';
+    $('s-losses').textContent = s.losses ?? '0';
+    const avgPnl = s.avg_pnl;
+    const el = $('s-avg-pnl');
+    el.textContent = fmtPct(avgPnl);
+    el.className = 'stat-value ' + (avgPnl > 0 ? 'green' : avgPnl < 0 ? 'red' : '');
+    const totalPnl = s.total_pnl_usdt;
+    const tel = $('s-total-pnl');
+    tel.textContent = totalPnl != null ? (totalPnl >= 0 ? '+' : '') + fmt(totalPnl, 2) + ' $' : '—';
+    tel.className = 'stat-value ' + (totalPnl > 0 ? 'green' : totalPnl < 0 ? 'red' : '');
+    $('s-best').textContent = s.best_trade_pct != null ? '+' + fmt(s.best_trade_pct, 2) + '%' : '—';
+
+    const cands = await fetch('/api/parlayan/candidates').then(r=>r.json());
+    $('s-watching').textContent = cands.length;
+    if (s.session) {
+      $('s-session').textContent = s.session.strategy_version || 'professional_paper_v3';
+      $('s-session-sub').textContent = s.session.session_name || 'aktif oturum';
+    }
+  } catch(e) {}
+}
+
+// ─── Parlayan Adaylar ─────────────────────────────────────────────────────
+async function loadCandidates() {
+  try {
+    const data = await fetch('/api/parlayan/candidates').then(r=>r.json());
+    if (!data.length) {
+      $('candidates-table').innerHTML = '<div class="empty">Henüz parlayan aday bulunamadı.<br>Bot tarama yapınca adaylar burada görünecek.</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>Sembol</th><th>24h Değişim</th><th>5m</th><th>15m</th>
+      <th>RSI</th><th>Volume</th><th>Parlayan Skor</th><th>Durum</th><th>Tespit</th>
+    </tr></thead><tbody>`;
+    for (const c of data) {
+      const ctx = c.context || {};
+      const statusBadge = {
+        WATCHING: '<span class="badge badge-watch">👁 İzleniyor</span>',
+        ENTERED:  '<span class="badge badge-entered">💼 Alındı</span>',
+        CLOSED:   '<span class="badge badge-closed">✓ Kapandı</span>',
+        EXPIRED:  '<span class="badge badge-expired">⏰ Süresi Doldu</span>',
+      }[c.status] || c.status;
+      html += `<tr>
+        <td class="symbol">${c.symbol}</td>
+        <td class="${pctClass(c.price_change_24h_pct)}">${fmtPct(c.price_change_24h_pct)}</td>
+        <td class="${pctClass(ctx.price_change_5m_pct)}">${fmtPct(ctx.price_change_5m_pct)}</td>
+        <td class="${pctClass(ctx.price_change_15m_pct)}">${fmtPct(ctx.price_change_15m_pct)}</td>
+        <td>${fmt(c.rsi, 1)}</td>
+        <td>${fmt(c.volume_ratio, 2)}x</td>
+        <td>${scoreBar(c.parlayan_score)}</td>
+        <td>${statusBadge}</td>
+        <td class="neutral">${fmtTs(c.detected_at)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    $('candidates-table').innerHTML = html;
+  } catch(e) {
+    $('candidates-table').innerHTML = '<div class="empty">Veri alınamadı.</div>';
+  }
+}
+
+// ─── Günün Yükselleri ─────────────────────────────────────────────────────
+async function loadGainers() {
+  try {
+    const data = await fetch('/api/parlayan/today').then(r=>r.json());
+    if (!data.length) {
+      $('gainers-table').innerHTML = '<div class="empty">Bugün henüz parlayan coin tespit edilmedi.</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>#</th><th>Sembol</th><th>24h Değişim</th><th>Parlayan Skor</th>
+      <th>Volume</th><th>RSI</th><th>Giriş Fiyatı</th><th>Peak Kazanç</th><th>Durum</th>
+    </tr></thead><tbody>`;
+    data.forEach((c, i) => {
+      const statusBadge = {
+        WATCHING: '<span class="badge badge-watch">👁</span>',
+        ENTERED:  '<span class="badge badge-entered">💼</span>',
+        CLOSED:   '<span class="badge badge-closed">✓</span>',
+        EXPIRED:  '<span class="badge badge-expired">⏰</span>',
+      }[c.status] || c.status;
+      html += `<tr>
+        <td class="neutral">${i+1}</td>
+        <td class="symbol">${c.symbol}</td>
+        <td class="pos">${fmtPct(c.price_change_24h_pct)}</td>
+        <td>${scoreBar(c.parlayan_score)}</td>
+        <td>${fmt(c.volume_ratio, 2)}x</td>
+        <td>${fmt(c.rsi, 1)}</td>
+        <td>${c.entry_price ? '$' + fmt(c.entry_price, 6) : '—'}</td>
+        <td class="${c.peak_gain_pct > 0 ? 'pos' : 'neutral'}">${c.peak_gain_pct ? fmtPct(c.peak_gain_pct) : '—'}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    $('gainers-table').innerHTML = html;
+  } catch(e) {
+    $('gainers-table').innerHTML = '<div class="empty">Veri alınamadı.</div>';
+  }
+}
+
+// ─── Açık İşlemler ────────────────────────────────────────────────────────
+async function loadOpenTrades() {
+  try {
+    const data = await fetch('/api/trades/open').then(r=>r.json());
+    if (!data.length) {
+      $('open-trades-table').innerHTML = '<div class="empty">Şu an açık işlem yok.</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>Sembol</th><th>Giriş Fiyatı</th><th>Güncel Fiyat</th>
+      <th>Anlık PnL</th><th>Max Kazanç</th><th>Stop Fiyatı</th><th>Boyut</th><th>Süre</th>
+    </tr></thead><tbody>`;
+    for (const t of data) {
+      const entry = +t.entry_price;
+      const last = t.last_price ? +t.last_price : entry;
+      const maxP = t.max_price ? +t.max_price : entry;
+      const curPnl = ((last - entry) / entry) * 100;
+      const maxGain = ((maxP - entry) / entry) * 100;
+      const stop = t.protected_stop_price ? +t.protected_stop_price : entry * (1 - +t.stop_loss_pct / 100);
+      const entryTs = new Date(t.entry_ts);
+      const age = Math.round((Date.now() - entryTs) / 60000);
+      html += `<tr>
+        <td class="symbol">${t.symbol}</td>
+        <td>$${fmt(entry, 6)}</td>
+        <td>$${fmt(last, 6)}</td>
+        <td class="${pctClass(curPnl)}">${fmtPct(curPnl)}</td>
+        <td class="pos">${fmtPct(maxGain)}</td>
+        <td class="neutral">$${fmt(stop, 6)}</td>
+        <td>${fmt(t.quote_size, 0)} $</td>
+        <td class="neutral">${age} dk</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    $('open-trades-table').innerHTML = html;
+  } catch(e) {
+    $('open-trades-table').innerHTML = '<div class="empty">Veri alınamadı.</div>';
+  }
+}
+
+// ─── İşlem Geçmişi ────────────────────────────────────────────────────────
+async function loadHistory() {
+  try {
+    const data = await fetch('/api/trades/recent').then(r=>r.json());
+    const closed = data.filter(t => t.status === 'CLOSED');
+    if (!closed.length) {
+      $('history-table').innerHTML = '<div class="empty">Henüz kapatılmış işlem yok.</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>Sembol</th><th>Giriş</th><th>Çıkış</th><th>Net PnL</th>
+      <th>Boyut</th><th>Çıkış Sebebi</th><th>Tarih</th>
+    </tr></thead><tbody>`;
+    for (const t of closed) {
+      const pnl = +t.pnl_pct;
+      const pnlQ = t.pnl_quote ? +t.pnl_quote : 0;
+      const reasonLabel = {
+        'TAKE_PROFIT':       '🎯 Hedef',
+        'TRAILING_STOP':     '📉 Trailing',
+        'STOP_LOSS':         '🛑 Stop',
+        'PROFIT_PROTECTION': '🔒 Koruma',
+        'MAX_TIME_EXIT':     '⏰ Süre',
+      }[t.exit_reason] || t.exit_reason;
+      html += `<tr>
+        <td class="symbol">${t.symbol}</td>
+        <td>$${fmt(t.entry_price, 6)}</td>
+        <td>$${fmt(t.exit_price, 6)}</td>
+        <td class="${pctClass(pnl)}">
+          ${fmtPct(pnl)}<br>
+          <span style="font-size:11px">${pnlQ >= 0 ? '+' : ''}${fmt(pnlQ,2)} $</span>
+        </td>
+        <td>${fmt(t.quote_size, 0)} $</td>
+        <td>${reasonLabel}</td>
+        <td class="neutral">${fmtTs(t.exit_ts)}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    $('history-table').innerHTML = html;
+  } catch(e) {
+    $('history-table').innerHTML = '<div class="empty">Veri alınamadı.</div>';
+  }
+}
+
+// ─── Piyasa ──────────────────────────────────────────────────────────────
+async function loadMarket() {
+  try {
+    const data = await fetch('/api/market/top').then(r=>r.json());
+    if (!data.length) {
+      $('market-table').innerHTML = '<div class="empty">Tarama verisi yok. Bot çalışıyor mu?</div>';
+      return;
+    }
+    let html = `<table><thead><tr>
+      <th>#</th><th>Sembol</th><th>Fiyat</th><th>24h</th><th>15m</th><th>5m</th>
+      <th>RSI</th><th>Volume</th><th>Likidite</th><th>Fake Risk</th><th>Parlayan Skor</th>
+    </tr></thead><tbody>`;
+    data.slice(0, 50).forEach((r, i) => {
+      html += `<tr>
+        <td class="neutral">${i+1}</td>
+        <td class="symbol">${r.symbol}</td>
+        <td>$${fmt(r.price, 6)}</td>
+        <td class="${pctClass(r.price_change_24h_pct)}">${fmtPct(r.price_change_24h_pct)}</td>
+        <td class="${pctClass(r.price_change_15m_pct)}">${fmtPct(r.price_change_15m_pct)}</td>
+        <td class="${pctClass(r.price_change_5m_pct)}">${fmtPct(r.price_change_5m_pct)}</td>
+        <td>${fmt(r.rsi, 1)}</td>
+        <td>${fmt(r.volume_ratio, 2)}x</td>
+        <td>${fmt(r.liquidity_score, 1)}</td>
+        <td class="${r.fake_pump_risk > 60 ? 'neg' : 'neutral'}">${fmt(r.fake_pump_risk, 1)}</td>
+        <td>${scoreBar(r.parlayan_score)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    $('market-table').innerHTML = html;
+  } catch(e) {
+    $('market-table').innerHTML = '<div class="empty">Veri alınamadı.</div>';
+  }
+}
+
+// ─── Olaylar ─────────────────────────────────────────────────────────────
+async function loadEvents() {
+  try {
+    const data = await fetch('/api/events?limit=60').then(r=>r.json());
+    if (!data.length) { $('events-list').innerHTML = '<div class="empty">Olay yok.</div>'; return; }
+    $('events-list').innerHTML = data.map(e => `
+      <div class="event-item">
+        <span class="event-level level-${e.level}">${e.level}</span>
+        <span class="event-ts">${fmtTs(e.ts)}</span>
+        <span class="event-msg">[${e.category}] ${e.message}</span>
+      </div>
+    `).join('');
+  } catch(e) {}
+}
+
+// ─── Kontroller ───────────────────────────────────────────────────────────
+async function startScanner() {
+  await fetch('/api/scanner/start', {method:'POST'});
+  setTimeout(loadStatus, 500);
+}
+async function stopScanner() {
+  await fetch('/api/scanner/stop', {method:'POST'});
+  setTimeout(loadStatus, 500);
+}
+async function scanNow() {
+  const btn = event.target;
+  btn.textContent = '⏳ Taranıyor...';
+  btn.disabled = true;
+  await fetch('/api/scanner/scan-now', {method:'POST'});
+  setTimeout(() => { btn.textContent = '⚡ Tara'; btn.disabled = false; loadAll(); }, 2000);
+}
+
+// ─── Periyodik Güncelleme ─────────────────────────────────────────────────
+function loadAll() {
+  loadStatus();
+  loadStats();
+  loadCandidates();
+  loadOpenTrades();
+  loadHistory();
+}
+
+loadAll();
+setInterval(loadAll, 10000); // Her 10 saniyede güncelle
+</script>
+</body>
+</html>

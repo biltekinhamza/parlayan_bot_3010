@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: parlayan_db
+    environment:
+      POSTGRES_USER: parlayan
+      POSTGRES_PASSWORD: parlayan_pass
+      POSTGRES_DB: parlayan
+    volumes:
+      - parlayan_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parlayan -d parlayan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: parlayan_bot
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://parlayan:parlayan_pass@db:5432/parlayan
+      AUTO_SCANNER_ENABLED: "true"
+    ports:
+      - "3010:3010"
+    volumes:
+      - ./config:/app/config
+    restart: unless-stopped
+
+volumes:
+  parlayan_pgdata:

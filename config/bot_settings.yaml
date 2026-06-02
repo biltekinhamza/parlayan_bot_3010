@@ -1,0 +1,152 @@
+app:
+  name: Parlayan Bot
+  mode: paper
+  port: 3010
+  timezone: Europe/Istanbul
+  strategy_version: professional_paper_v41
+binance:
+  rest_base_url: https://api.binance.com
+  request_timeout_seconds: 12
+  max_retries: 3
+  market_data_only: true
+  quote_asset: USDT
+  exclude_symbols_contains:
+  - UP
+  - DOWN
+  - BULL
+  - BEAR
+  exclude_bases:
+  - USDC
+  - FDUSD
+  - TUSD
+  - BUSD
+  - DAI
+  - EUR
+  - TRY
+  - BRL
+scanner:
+  auto_scan_enabled: true
+  scan_interval_seconds: 60
+  kline_interval: 5m
+  kline_limit: 120
+  max_symbols_per_scan: 240
+  decision_limit_symbols: 180
+  min_quote_volume_24h_usdt: 500000
+  top_by_quote_volume: 80
+  top_by_price_change: 100
+  top_by_trade_count: 60
+position_monitor:
+  enabled: true
+  interval_seconds: 15
+strategy:
+  parlayan:
+    min_24h_change_pct: 3.0
+    min_pre_pump_score_for_watch: 48.0
+    min_parlayan_score_for_watch: 20
+    min_volume_ratio: 0.75
+    min_liquidity_score: 28
+    max_spread_pct: 0.45
+    rsi_min: 36
+    rsi_max: 76
+    max_watch_candidates: 60
+    min_24h_change_pct_for_entry: 4.0
+    max_24h_change_pct_for_entry: 30.0
+    min_pre_pump_score_for_entry: 64.0
+    min_parlayan_score_for_entry: 48
+    max_fake_pump_risk_for_entry: 72
+    min_5m_change_for_entry: 0.0
+    hard_fomo_24h_block_pct: 35.0
+    min_volume_ratio_for_entry: 0.75
+    min_15m_change_for_entry: 0.25
+    min_30m_change_for_entry: -0.5
+    ideal_rsi_min: 52.0
+    ideal_rsi_max: 68.0
+    min_recovery_score_for_entry: 66.0
+    min_recovery_5m_change_for_entry: 0.15
+    min_recovery_15m_change_for_entry: 0.35
+    max_recovery_24h_change_for_entry: 28.0
+    min_volume_wakeup_score_for_entry: 70.0
+paper_trading:
+  enabled: true
+  starting_equity_usdt: 1000
+  default_quote_size_usdt: 75
+  max_open_trades: 4
+  max_slippage_pct_estimate: 0.75
+  stop_extra_slippage_pct: 0.08
+  hard_min_parlayan_score: 42
+  max_entries_per_symbol_12h: 1
+  fee_rate_estimate: 0.001
+  slippage_pct_estimate: 0.05
+  take_profit_pct: 16.0
+  stop_loss_pct: 3.2
+  break_even_start_pct: 3.2
+  break_even_buffer_pct: 1.2
+  trailing_start_pct: 6.5
+  trailing_gap_pct: 2.8
+  max_minutes_in_trade: 210
+  cooldown_after_stop_minutes: 120
+  cooldown_after_protection_stop_minutes: 60
+  cooldown_after_max_time_minutes: 30
+  cooldown_after_two_losses_minutes: 480
+  initial_stop_grace_minutes: 6
+  recovery_stop_loss_pct: 4.0
+  momentum_stop_loss_pct: 3.0
+risk:
+  enabled: true
+  max_open_trades: 4
+  max_total_open_notional_usdt: 320
+  max_unrealized_loss_usdt: 22
+  max_position_usdt: 100
+  daily_max_loss_usdt: 35
+  max_daily_closed_trades: 40
+  min_equity_usdt: 750
+  min_pre_pump_score_for_entry: 62
+  blocked_market_phases:
+  - FOMO
+  - LATE_FOMO
+  - DANGER
+  - DISTRIBUTION
+ui:
+  refresh_seconds: 10
+storage:
+  keep_snapshot_days: 30
+
+
+phase_risk:
+  # V4.1: stop ve grace period artık faza göre değişir.
+  # FOMO/DANGER/DISTRIBUTION için grace yok; erken fazlarda kısa nefes alanı var.
+  initial_stop_grace_minutes:
+    RECOVERY_COMPRESSION: 6
+    VOLUME_WAKEUP: 4
+    EARLY_MOMENTUM: 3
+    ACCUMULATION_BREAKOUT: 3
+    MOMENTUM_EXPANSION: 1
+    FOMO: 0
+    LATE_FOMO: 0
+    DANGER: 0
+    DISTRIBUTION: 0
+  stop_loss_pct:
+    RECOVERY_COMPRESSION: 4.0
+    VOLUME_WAKEUP: 3.4
+    EARLY_MOMENTUM: 3.0
+    ACCUMULATION_BREAKOUT: 3.0
+    MOMENTUM_EXPANSION: 2.6
+    FOMO: 1.8
+    LATE_FOMO: 1.6
+    DANGER: 1.2
+    DISTRIBUTION: 1.5
+  trailing_gap_pct:
+    RECOVERY_COMPRESSION: 3.6
+    VOLUME_WAKEUP: 3.2
+    EARLY_MOMENTUM: 2.8
+    ACCUMULATION_BREAKOUT: 2.8
+    MOMENTUM_EXPANSION: 2.4
+    FOMO: 1.8
+    LATE_FOMO: 1.6
+    DANGER: 1.2
+    DISTRIBUTION: 1.4
+
+research:
+  log_decision_rejections: true
+  reject_log_min_pre_pump_score: 0
+  pump_detective_v2_enabled: true
