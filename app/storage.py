@@ -5,7 +5,7 @@ from typing import Any
 
 from .db import db, jsonb
 
-STRATEGY_VERSION = "professional_paper_v44"
+STRATEGY_VERSION = "professional_paper_v45"
 MODE = "paper"
 
 
@@ -773,7 +773,7 @@ def get_winning_pattern_report(all_time: bool = False) -> dict[str, Any]:
 # Amaç: session restart sonrası eski açık pozisyonları riskten düşürmemek,
 # unrealized PnL'i hesaba katmak ve Pump Detective v2 raporlarını üretmek.
 
-STRATEGY_VERSION = "professional_paper_v44"
+STRATEGY_VERSION = "professional_paper_v45"
 
 
 def start_paper_session(config_snapshot: dict[str, Any] | None = None, strategy_version: str = STRATEGY_VERSION) -> dict[str, Any]:
@@ -1140,7 +1140,7 @@ def get_pump_detective_v2_report(threshold_pct: float = 30.0, limit: int = 100) 
 
 # ─── V4.3 Velocity / Paper Integrity Reports ─────────────────────────────────
 
-STRATEGY_VERSION = "professional_paper_v44"
+STRATEGY_VERSION = "professional_paper_v45"
 
 
 def patch_trade_context(trade_id: str, patch: dict[str, Any]) -> None:
@@ -1801,4 +1801,417 @@ def get_v44_trade_quality_report(hours: int = 24, all_time: bool = True) -> dict
         "by_exit_reason": by_reason,
         "worst_trades": sorted(losses, key=lambda r: _num(r.get("pnl_pct")))[:10],
         "best_trades": sorted(wins, key=lambda r: _num(r.get("pnl_pct")), reverse=True)[:10],
+    }
+
+
+# ─── V4.5 Pattern Memory / Market DNA ────────────────────────────────────────
+
+def _feature_metrics(feature: Any) -> dict[str, Any]:
+    extra = getattr(feature, "extra", {}) or {}
+    return {
+        "price": _num(getattr(feature, "price", None)),
+        "rsi": _num(getattr(feature, "rsi", None)),
+        "price_change_5m_pct": _num(getattr(feature, "price_change_5m_pct", None)),
+        "price_change_15m_pct": _num(getattr(feature, "price_change_15m_pct", None)),
+        "price_change_30m_pct": _num(getattr(feature, "price_change_30m_pct", None)),
+        "price_change_1h_pct": _num(extra.get("price_change_1h_pct")),
+        "price_change_4h_pct": _num(extra.get("price_change_4h_pct")),
+        "price_change_24h_pct": _num(getattr(feature, "price_change_24h_pct", None)),
+        "quote_volume_24h": _num(getattr(feature, "quote_volume_24h", None)),
+        "trade_count_24h": _num(getattr(feature, "trade_count_24h", None)),
+        "spread_pct": _num(getattr(feature, "spread_pct", None)),
+        "volume_ratio": _num(getattr(feature, "volume_ratio", None)),
+        "momentum_score": _num(getattr(feature, "momentum_score", None)),
+        "liquidity_score": _num(getattr(feature, "liquidity_score", None)),
+        "fake_pump_risk": _num(getattr(feature, "fake_pump_risk", None)),
+        "parlayan_score": _num(getattr(feature, "parlayan_score", None)),
+        "pre_pump_score": _num(extra.get("pre_pump_score")),
+        "velocity_score": _num(extra.get("velocity_score")),
+        "fast_alarm_score": _num(extra.get("fast_alarm_score")),
+        "price_velocity_1m_pct": _num(extra.get("price_velocity_1m_pct")),
+        "price_velocity_5m_pct": _num(extra.get("price_velocity_5m_pct")),
+        "momentum_acceleration": _num(extra.get("momentum_acceleration")),
+        "volume_velocity": _num(extra.get("volume_velocity")),
+        "trade_count_velocity": _num(extra.get("trade_count_velocity")),
+        "directional_volume_score": _num(extra.get("directional_volume_score")),
+        "up_volume_ratio": _num(extra.get("up_volume_ratio")),
+        "down_volume_ratio": _num(extra.get("down_volume_ratio")),
+        "directional_volume_delta": _num(extra.get("directional_volume_delta")),
+        "close_location_score": _num(extra.get("close_location_score")),
+        "recent_green_bar_ratio": _num(extra.get("recent_green_bar_ratio")),
+        "market_phase": extra.get("market_phase"),
+        "v4_profile": extra.get("v4_profile"),
+    }
+
+
+def _snapshot_metrics(row: dict[str, Any] | None) -> dict[str, Any]:
+    if not row:
+        return {}
+    extra = row.get("extra") or {}
+    return {
+        "snapshot_id": str(row.get("id")) if row.get("id") is not None else None,
+        "ts": row.get("ts").isoformat() if isinstance(row.get("ts"), datetime) else row.get("ts"),
+        "price": _num(row.get("price")),
+        "rsi": _num(row.get("rsi")),
+        "price_change_5m_pct": _num(row.get("price_change_5m_pct")),
+        "price_change_15m_pct": _num(row.get("price_change_15m_pct")),
+        "price_change_30m_pct": _num(row.get("price_change_30m_pct")),
+        "price_change_1h_pct": _num(extra.get("price_change_1h_pct")),
+        "price_change_4h_pct": _num(extra.get("price_change_4h_pct")),
+        "price_change_24h_pct": _num(row.get("price_change_24h_pct")),
+        "quote_volume_24h": _num(row.get("quote_volume_24h")),
+        "trade_count_24h": _num(row.get("trade_count_24h")),
+        "spread_pct": _num(row.get("spread_pct")),
+        "volume_ratio": _num(row.get("volume_ratio")),
+        "momentum_score": _num(row.get("momentum_score")),
+        "liquidity_score": _num(row.get("liquidity_score")),
+        "fake_pump_risk": _num(row.get("fake_pump_risk")),
+        "parlayan_score": _num(row.get("parlayan_score")),
+        "pre_pump_score": _num(extra.get("pre_pump_score")),
+        "velocity_score": _num(extra.get("velocity_score")),
+        "fast_alarm_score": _num(extra.get("fast_alarm_score")),
+        "price_velocity_1m_pct": _num(extra.get("price_velocity_1m_pct")),
+        "price_velocity_5m_pct": _num(extra.get("price_velocity_5m_pct")),
+        "momentum_acceleration": _num(extra.get("momentum_acceleration")),
+        "volume_velocity": _num(extra.get("volume_velocity")),
+        "trade_count_velocity": _num(extra.get("trade_count_velocity")),
+        "directional_volume_score": _num(extra.get("directional_volume_score")),
+        "up_volume_ratio": _num(extra.get("up_volume_ratio")),
+        "down_volume_ratio": _num(extra.get("down_volume_ratio")),
+        "directional_volume_delta": _num(extra.get("directional_volume_delta")),
+        "close_location_score": _num(extra.get("close_location_score")),
+        "recent_green_bar_ratio": _num(extra.get("recent_green_bar_ratio")),
+        "market_phase": extra.get("market_phase") or row.get("bot_state"),
+        "v4_profile": extra.get("v4_profile"),
+    }
+
+
+def _label_lifecycle_result(result_pct: float, threshold_pct: float, max_drawdown_pct: float | None = None) -> str:
+    if result_pct >= threshold_pct * 2:
+        return "EXPLOSIVE_WINNER"
+    if result_pct >= threshold_pct:
+        return "THRESHOLD_WINNER"
+    if result_pct >= threshold_pct * 0.5:
+        return "PARTIAL_FOLLOW_THROUGH"
+    if max_drawdown_pct is not None and max_drawdown_pct <= -5:
+        return "FAILED_AND_DRAWDOWN"
+    return "NO_FOLLOW_THROUGH"
+
+
+def record_pattern_memory_samples(
+    features: list[Any],
+    thresholds_pct: tuple[float, ...] = (10, 20, 30, 50, 100),
+    horizons_minutes: tuple[int, ...] = (15, 30, 60, 240),
+    dedupe_cooldown_minutes: int = 180,
+) -> dict[str, Any]:
+    """
+    Her scan'de güçlü hareketleri learning dataset'e yazar.
+    Örnek: son 60 dakikada +30 yapan coin için 60 dakika önceki metrikleri,
+    trigger anındaki metrikleri ve hareket sonucunu coin_lifecycle_events tablosuna ekler.
+    """
+    current = get_current_session()
+    session_id = current.get("session_id")
+    strategy_version = current.get("strategy_version") or STRATEGY_VERSION
+    mode = current.get("mode") or MODE
+    regime = (get_metadata("market_regime", {}) or {}).get("regime")
+    inserted_events: list[dict[str, Any]] = []
+
+    for feature in features:
+        symbol = getattr(feature, "symbol", None)
+        trigger_price = _num(getattr(feature, "price", None))
+        trigger_ts = getattr(feature, "ts", None) or utc_now()
+        if not symbol or trigger_price <= 0:
+            continue
+
+        trigger_metrics = _feature_metrics(feature)
+        for horizon in horizons_minutes:
+            before = db.fetch_one(
+                """
+                SELECT *
+                FROM market_snapshots
+                WHERE symbol=%s
+                  AND ts <= %s - (%s || ' minutes')::interval
+                  AND price > 0
+                ORDER BY ts DESC
+                LIMIT 1
+                """,
+                (symbol, trigger_ts, horizon),
+            )
+            if not before:
+                continue
+            start_price = _num(before.get("price"))
+            if start_price <= 0:
+                continue
+            result_pct = ((trigger_price - start_price) / start_price) * 100.0
+
+            future_window = db.fetch_one(
+                """
+                SELECT
+                    MAX(price) AS max_price,
+                    MIN(price) AS min_price
+                FROM market_snapshots
+                WHERE symbol=%s
+                  AND ts >= %s
+                  AND ts <= %s + (%s || ' minutes')::interval
+                  AND price > 0
+                """,
+                (symbol, before.get("ts"), trigger_ts, horizon),
+            ) or {}
+            max_price = _num(future_window.get("max_price"), trigger_price)
+            min_price = _num(future_window.get("min_price"), start_price)
+            max_upside_pct = ((max_price - start_price) / start_price) * 100.0 if start_price > 0 else result_pct
+            max_drawdown_pct = ((min_price - start_price) / start_price) * 100.0 if start_price > 0 else 0.0
+
+            for threshold in thresholds_pct:
+                if result_pct < threshold:
+                    continue
+
+                duplicate = db.fetch_one(
+                    """
+                    SELECT id
+                    FROM coin_lifecycle_events
+                    WHERE symbol=%s
+                      AND threshold_pct=%s
+                      AND horizon_minutes=%s
+                      AND detected_at > now() - (%s || ' minutes')::interval
+                    LIMIT 1
+                    """,
+                    (symbol, threshold, horizon, dedupe_cooldown_minutes),
+                )
+                if duplicate:
+                    continue
+
+                before_metrics = _snapshot_metrics(before)
+                outcome_label = _label_lifecycle_result(result_pct, threshold, max_drawdown_pct)
+                event = db.fetch_one(
+                    """
+                    INSERT INTO coin_lifecycle_events(
+                        session_id, strategy_version, mode, symbol,
+                        event_type, threshold_pct, horizon_minutes,
+                        start_ts, start_price, trigger_ts, trigger_price,
+                        result_pct, max_upside_pct, max_drawdown_pct,
+                        market_regime, outcome_label,
+                        before_metrics, trigger_metrics, after_metrics, details
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id, symbol, threshold_pct, horizon_minutes, result_pct, outcome_label
+                    """,
+                    (
+                        session_id, strategy_version, mode, symbol,
+                        "MOVE_THRESHOLD_CROSSED", threshold, horizon,
+                        before.get("ts"), start_price, trigger_ts, trigger_price,
+                        result_pct, max_upside_pct, max_drawdown_pct,
+                        regime, outcome_label,
+                        jsonb(before_metrics), jsonb(trigger_metrics), jsonb({}),
+                        jsonb({
+                            "dedupe_cooldown_minutes": dedupe_cooldown_minutes,
+                            "source": "pattern_memory_engine_v45",
+                            "start_snapshot_id": str(before.get("id")),
+                        }),
+                    ),
+                )
+                if not event:
+                    continue
+                event_id = event["id"]
+                db.executemany(
+                    """
+                    INSERT INTO pattern_memory_samples(
+                        lifecycle_event_id, symbol, sample_ts, stage, offset_minutes, price, metrics
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    [
+                        (event_id, symbol, before.get("ts"), "BEFORE", -horizon, start_price, jsonb(before_metrics)),
+                        (event_id, symbol, trigger_ts, "TRIGGER", 0, trigger_price, jsonb(trigger_metrics)),
+                    ],
+                )
+                inserted_events.append(dict(event))
+
+    if inserted_events:
+        log_event("INFO", "pattern_memory", "Pattern Memory olayları kaydedildi", {"inserted": len(inserted_events), "events": inserted_events[:20]})
+
+    return {
+        "enabled": True,
+        "inserted": len(inserted_events),
+        "events": inserted_events[:50],
+        "thresholds_pct": list(thresholds_pct),
+        "horizons_minutes": list(horizons_minutes),
+    }
+
+
+def get_pattern_memory_report(hours: int = 72, threshold_pct: float | None = None, limit: int = 100) -> dict[str, Any]:
+    params: list[Any] = [hours]
+    threshold_filter = ""
+    if threshold_pct is not None:
+        threshold_filter = "AND threshold_pct >= %s"
+        params.append(threshold_pct)
+    params.append(limit)
+    events = db.fetch_all(
+        f"""
+        SELECT *
+        FROM coin_lifecycle_events
+        WHERE detected_at > now() - (%s || ' hours')::interval
+        {threshold_filter}
+        ORDER BY detected_at DESC
+        LIMIT %s
+        """,
+        tuple(params),
+    )
+    summary = db.fetch_all(
+        f"""
+        SELECT
+            threshold_pct,
+            horizon_minutes,
+            market_regime,
+            COUNT(*) AS samples,
+            ROUND(AVG(result_pct), 4) AS avg_result_pct,
+            ROUND(AVG(max_upside_pct), 4) AS avg_max_upside_pct,
+            ROUND(AVG(max_drawdown_pct), 4) AS avg_max_drawdown_pct,
+            COUNT(*) FILTER (WHERE outcome_label IN ('EXPLOSIVE_WINNER','THRESHOLD_WINNER')) AS winners
+        FROM coin_lifecycle_events
+        WHERE detected_at > now() - (%s || ' hours')::interval
+        {threshold_filter}
+        GROUP BY threshold_pct, horizon_minutes, market_regime
+        ORDER BY threshold_pct DESC, samples DESC
+        LIMIT 100
+        """,
+        tuple(params[:-1]),
+    )
+    return {
+        "version": "pattern_memory_v45",
+        "hours": hours,
+        "threshold_pct": threshold_pct,
+        "summary": summary,
+        "events": events,
+    }
+
+
+def _avg_metric(rows: list[dict[str, Any]], key: str) -> float:
+    vals = []
+    for row in rows:
+        metrics = row.get("before_metrics") or {}
+        value = metrics.get(key)
+        try:
+            if value is not None:
+                vals.append(float(value))
+        except Exception:
+            continue
+    return round(sum(vals) / len(vals), 6) if vals else 0.0
+
+
+def refresh_market_dna_profiles(lookback_days: int = 30, min_samples: int = 8) -> dict[str, Any]:
+    """
+    Lifecycle olaylarından rule kalibrasyonu için istatistik profilleri üretir.
+    Bu fonksiyon stratejiyi otomatik değiştirmez; dashboard/research için evidence layer üretir.
+    """
+    groups = db.fetch_all(
+        """
+        SELECT threshold_pct, horizon_minutes, COALESCE(market_regime, 'UNKNOWN') AS market_regime
+        FROM coin_lifecycle_events
+        WHERE detected_at > now() - (%s || ' days')::interval
+        GROUP BY threshold_pct, horizon_minutes, COALESCE(market_regime, 'UNKNOWN')
+        HAVING COUNT(*) >= %s
+        ORDER BY threshold_pct DESC, horizon_minutes ASC
+        """,
+        (lookback_days, min_samples),
+    )
+    updated = 0
+    metric_keys = [
+        "volume_ratio",
+        "pre_pump_score",
+        "velocity_score",
+        "fast_alarm_score",
+        "momentum_acceleration",
+        "directional_volume_score",
+        "up_volume_ratio",
+        "spread_pct",
+        "liquidity_score",
+        "parlayan_score",
+        "price_change_5m_pct",
+        "price_change_15m_pct",
+        "price_change_24h_pct",
+    ]
+
+    for group in groups:
+        threshold = _num(group.get("threshold_pct"))
+        horizon = int(_num(group.get("horizon_minutes")))
+        regime = str(group.get("market_regime") or "UNKNOWN")
+        rows = db.fetch_all(
+            """
+            SELECT *
+            FROM coin_lifecycle_events
+            WHERE detected_at > now() - (%s || ' days')::interval
+              AND threshold_pct=%s
+              AND horizon_minutes=%s
+              AND COALESCE(market_regime, 'UNKNOWN')=%s
+            """,
+            (lookback_days, threshold, horizon, regime),
+        )
+        if len(rows) < min_samples:
+            continue
+
+        sample_count = len(rows)
+        winners = [r for r in rows if r.get("outcome_label") in ("EXPLOSIVE_WINNER", "THRESHOLD_WINNER")]
+        win_rate = len(winners) / sample_count * 100.0 if sample_count else 0.0
+        avg_result = sum(_num(r.get("result_pct")) for r in rows) / sample_count
+        avg_upside = sum(_num(r.get("max_upside_pct")) for r in rows) / sample_count
+        avg_drawdown = sum(_num(r.get("max_drawdown_pct")) for r in rows) / sample_count
+
+        feature_stats = {key: _avg_metric(rows, key) for key in metric_keys}
+        recommendations = {
+            "candidate_rule_bias": "tighten" if win_rate < 45 else "normal" if win_rate < 65 else "can_relax_slightly",
+            "min_volume_ratio_hint": round(feature_stats.get("volume_ratio", 0) * 0.85, 4),
+            "min_velocity_score_hint": round(feature_stats.get("velocity_score", 0) * 0.80, 4),
+            "min_directional_volume_score_hint": round(feature_stats.get("directional_volume_score", 0) * 0.85, 4),
+            "note": "Hints are descriptive research outputs, not automatic trading changes.",
+        }
+        profile_key = f"{regime}:{threshold:g}:{horizon}"
+        db.execute(
+            """
+            INSERT INTO market_dna_profiles(
+                profile_key, profile_type, horizon_minutes, threshold_pct,
+                sample_count, win_rate, avg_result_pct, avg_max_upside_pct, avg_max_drawdown_pct,
+                feature_stats, recommendations, updated_at
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+            ON CONFLICT (profile_key) DO UPDATE SET
+                sample_count=EXCLUDED.sample_count,
+                win_rate=EXCLUDED.win_rate,
+                avg_result_pct=EXCLUDED.avg_result_pct,
+                avg_max_upside_pct=EXCLUDED.avg_max_upside_pct,
+                avg_max_drawdown_pct=EXCLUDED.avg_max_drawdown_pct,
+                feature_stats=EXCLUDED.feature_stats,
+                recommendations=EXCLUDED.recommendations,
+                updated_at=now()
+            """,
+            (
+                profile_key, regime, horizon, threshold,
+                sample_count, win_rate, avg_result, avg_upside, avg_drawdown,
+                jsonb(feature_stats), jsonb(recommendations),
+            ),
+        )
+        updated += 1
+
+    if updated:
+        log_event("INFO", "market_dna", "Market DNA profilleri yenilendi", {"profiles_updated": updated, "lookback_days": lookback_days})
+    return {"enabled": True, "profiles_updated": updated, "lookback_days": lookback_days, "min_samples": min_samples}
+
+
+def get_market_dna_report(limit: int = 100, refresh: bool = False) -> dict[str, Any]:
+    refresh_result = {}
+    if refresh:
+        refresh_result = refresh_market_dna_profiles()
+    profiles = db.fetch_all(
+        """
+        SELECT *
+        FROM market_dna_profiles
+        ORDER BY threshold_pct DESC, sample_count DESC, updated_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    return {
+        "version": "market_dna_v45",
+        "refresh": refresh_result,
+        "profiles": profiles,
     }

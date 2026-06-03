@@ -11,6 +11,8 @@ from .decision_engine import DecisionEngine
 from .feature_engine import FeatureEngine
 from .models import MarketFeature
 from .trade_engine import TradeEngine
+from .pattern_memory_engine import PatternMemoryEngine
+from .market_dna_engine import MarketDNAEngine
 
 
 class ScannerService:
@@ -35,6 +37,8 @@ class ScannerService:
         self.feature_engine = FeatureEngine(self.client, config)
         self.decision_engine = DecisionEngine(config)
         self.trade_engine = TradeEngine(config)
+        self.pattern_memory_engine = PatternMemoryEngine(config)
+        self.market_dna_engine = MarketDNAEngine(config)
         self._running = False
 
     @property
@@ -49,6 +53,8 @@ class ScannerService:
         self.feature_engine.config = config
         self.decision_engine = DecisionEngine(config)
         self.trade_engine = TradeEngine(config)
+        self.pattern_memory_engine = PatternMemoryEngine(config)
+        self.market_dna_engine = MarketDNAEngine(config)
         storage.log_event("INFO", "config", "Config yeniden yüklendi", {})
 
     async def run_once(self) -> dict[str, Any]:
@@ -62,6 +68,10 @@ class ScannerService:
             features = await self.feature_engine.build_features()
             storage.insert_market_snapshots(features)
             market_regime = storage.compute_and_store_market_regime(features)
+            pattern_memory = self.pattern_memory_engine.process_scan(features)
+            market_dna_refresh = {}
+            if pattern_memory.get("inserted", 0) > 0:
+                market_dna_refresh = self.market_dna_engine.refresh()
             for feature in features:
                 extra = feature.extra or {}
                 if extra.get("phase_changed"):
@@ -234,6 +244,8 @@ class ScannerService:
                 "rejected": rejected,
                 "market_regime": market_regime,
                 "decision_outcomes_refresh": outcome_refresh,
+                "pattern_memory": pattern_memory,
+                "market_dna_refresh": market_dna_refresh,
                 "top_pre_pump": [
                     {
                         "symbol": f.symbol,

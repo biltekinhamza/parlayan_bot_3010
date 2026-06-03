@@ -5,6 +5,9 @@ from typing import Any
 
 from . import storage
 from .risk_manager import PaperRiskManager
+from .adaptive_profit_engine import AdaptiveProfitEngine
+from .follow_through_engine import FollowThroughEngine
+from .immediate_failure_exit import ImmediateFailureExit
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -18,7 +21,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class TradeEngine:
     """
-    Professional paper trade engine v4.4.
+    Professional paper trade engine v4.5.
 
     Bu motor hâlâ gerçek emir göndermez. Amacı kendimizi kandırmayan paper-trade:
     - Eski session açık pozisyonları global riskte izler.
@@ -31,6 +34,9 @@ class TradeEngine:
     def __init__(self, config: dict[str, Any]):
         self.config = config
         self.risk_manager = PaperRiskManager(config)
+        self.follow_through_engine = FollowThroughEngine(config)
+        self.immediate_failure_exit = ImmediateFailureExit(config)
+        self.adaptive_profit_engine = AdaptiveProfitEngine(config)
 
     @property
     def cfg(self) -> dict[str, Any]:
@@ -234,7 +240,7 @@ class TradeEngine:
         state["max_drawdown_pct"] = round(min(_f(state.get("max_drawdown_pct"), 0.0), current_net_gain_pct), 4)
 
         if current_gain_pct >= take_profit_pct:
-            adaptive_decision = self._adaptive_profit_decision(
+            adaptive_decision = self.adaptive_profit_engine.evaluate(
                 trade=trade,
                 context=context,
                 live_extra=live_extra,
@@ -310,7 +316,33 @@ class TradeEngine:
         state["active_stop"] = round(active_stop, 8)
         state["current_unrealized_pct"] = round(current_gain_pct - fee_pct, 4)
 
-        follow_decision = self._follow_through_decision(
+        immediate_failure = self.immediate_failure_exit.evaluate(
+            context=context,
+            live_extra=live_extra,
+            age_minutes=age_minutes,
+            current_net_gain_pct=current_net_gain_pct,
+            max_runup_pct=_f(state.get("max_runup_pct"), max_gain_pct - fee_pct),
+        )
+        state["immediate_failure_score"] = immediate_failure.get("score")
+        state["immediate_failure_reason"] = immediate_failure.get("reason")
+        if immediate_failure.get("exit"):
+            reason = str(immediate_failure.get("exit_reason") or "IMMEDIATE_FAILURE_EXIT")
+            exit_fill, fill_details = self._exit_fill(price, context, reason)
+            net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
+            pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+            self._record_close_context(trade, exit_fill, reason, net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
+            storage.close_paper_trade(str(trade["id"]), exit_fill, reason, net_pnl, pnl_usdt)
+            storage.insert_signal_event(symbol, "EXIT", "WARNING", net_pnl, exit_fill, {
+                "reason": reason,
+                "trade_id": str(trade["id"]),
+                "age_minutes": round(age_minutes, 2),
+                "immediate_failure": immediate_failure,
+                **fill_details,
+            })
+            self._post_close(symbol, reason, net_pnl, trade)
+            return
+
+        follow_decision = self.follow_through_engine.evaluate(
             trade=trade,
             context=context,
             live_extra=live_extra,
@@ -318,7 +350,6 @@ class TradeEngine:
             current_net_gain_pct=current_net_gain_pct,
             max_runup_pct=_f(state.get("max_runup_pct"), max_gain_pct - fee_pct),
             max_drawdown_pct=_f(state.get("max_drawdown_pct"), current_net_gain_pct),
-            cfg=cfg,
         )
         state["follow_through_score"] = follow_decision["score"]
         state["follow_through_reason"] = follow_decision["reason"]
@@ -487,7 +518,7 @@ class TradeEngine:
         if not ap_cfg.get("enabled", True):
             return {"extend": False, "reason": "disabled", "lock_pct": 0.0, "target_pct": _f(trade.get("take_profit_pct"), _f(cfg.get("take_profit_pct"), 15.0))}
 
-        persistence = self._trend_persistence_score(context, live_extra)
+        persistence = self.adaptive_profit_engine.trend_persistence_score(context, live_extra)
         min_persistence = _f(ap_cfg.get("min_trend_persistence_score"), 66.0)
         target_pct = _f(ap_cfg.get("extended_take_profit_pct"), 24.0)
         lock_pct = _f(ap_cfg.get("lock_profit_pct"), 10.0)

@@ -330,3 +330,68 @@ CREATE TABLE IF NOT EXISTS market_regime_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_market_regime_ts ON market_regime_snapshots (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_market_regime_regime_ts ON market_regime_snapshots (regime, ts DESC);
+
+
+-- ─── V4.5 Pattern Memory / Market DNA / Self Learning ──────────────────────
+-- Geriye uyumlu migration: mevcut tabloları bozmaz; yeni learning dataset tabloları ekler.
+
+CREATE TABLE IF NOT EXISTS coin_lifecycle_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID REFERENCES paper_sessions(id) ON DELETE SET NULL,
+    strategy_version TEXT,
+    mode TEXT NOT NULL DEFAULT 'paper',
+    symbol TEXT NOT NULL,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    event_type TEXT NOT NULL DEFAULT 'MOVE_THRESHOLD_CROSSED',
+    threshold_pct NUMERIC NOT NULL,
+    horizon_minutes INTEGER NOT NULL,
+    start_ts TIMESTAMPTZ NOT NULL,
+    start_price NUMERIC NOT NULL,
+    trigger_ts TIMESTAMPTZ NOT NULL,
+    trigger_price NUMERIC NOT NULL,
+    result_pct NUMERIC NOT NULL,
+    max_upside_pct NUMERIC,
+    max_drawdown_pct NUMERIC,
+    market_regime TEXT,
+    outcome_label TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+    before_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    trigger_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_symbol_ts ON coin_lifecycle_events (symbol, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_threshold_ts ON coin_lifecycle_events (threshold_pct, horizon_minutes, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_regime_ts ON coin_lifecycle_events (market_regime, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_details_gin ON coin_lifecycle_events USING GIN (details);
+
+CREATE TABLE IF NOT EXISTS pattern_memory_samples (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lifecycle_event_id UUID REFERENCES coin_lifecycle_events(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    sample_ts TIMESTAMPTZ NOT NULL,
+    stage TEXT NOT NULL, -- BEFORE | TRIGGER | AFTER
+    offset_minutes INTEGER NOT NULL DEFAULT 0,
+    price NUMERIC,
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_pattern_samples_event ON pattern_memory_samples (lifecycle_event_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_samples_symbol_stage_ts ON pattern_memory_samples (symbol, stage, sample_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_pattern_samples_metrics_gin ON pattern_memory_samples USING GIN (metrics);
+
+CREATE TABLE IF NOT EXISTS market_dna_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_key TEXT NOT NULL UNIQUE,
+    profile_type TEXT NOT NULL,
+    horizon_minutes INTEGER NOT NULL,
+    threshold_pct NUMERIC NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    win_rate NUMERIC NOT NULL DEFAULT 0,
+    avg_result_pct NUMERIC NOT NULL DEFAULT 0,
+    avg_max_upside_pct NUMERIC NOT NULL DEFAULT 0,
+    avg_max_drawdown_pct NUMERIC NOT NULL DEFAULT 0,
+    feature_stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recommendations JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_market_dna_type ON market_dna_profiles (profile_type, threshold_pct, horizon_minutes);
+CREATE INDEX IF NOT EXISTS idx_market_dna_updated ON market_dna_profiles (updated_at DESC);

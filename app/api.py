@@ -291,3 +291,58 @@ def get_market_regime(hours: int = 24):
 @router.get("/api/reports/v44-quality")
 def get_v44_quality_report(hours: int = 24, all_time: bool = True):
     return storage.get_v44_trade_quality_report(hours=hours, all_time=all_time)
+
+
+
+# ─── V4.5 Pattern Memory / Market DNA ────────────────────────────────────────
+
+@router.get("/api/research/pattern-memory")
+def get_pattern_memory(hours: int = 72, threshold_pct: float | None = None, limit: int = 100):
+    return storage.get_pattern_memory_report(hours=hours, threshold_pct=threshold_pct, limit=limit)
+
+
+@router.get("/api/research/market-dna")
+def get_market_dna(limit: int = 100, refresh: bool = False):
+    return storage.get_market_dna_report(limit=limit, refresh=refresh)
+
+
+@router.post("/api/research/market-dna/refresh")
+def refresh_market_dna():
+    return storage.refresh_market_dna_profiles()
+
+
+# ─── Documentation compatible aliases ────────────────────────────────────────
+
+@router.get("/api/reports/daily")
+def reports_daily(day: str | None = None, all_time: bool = False):
+    return storage.get_daily_signal_report(day=day, all_time=all_time)
+
+
+@router.get("/api/reports/velocity")
+def reports_velocity(hours: int = 24, limit: int = 100):
+    return storage.get_velocity_research_report(hours=hours, limit=limit)
+
+
+@router.get("/api/reports/pump-alarms")
+def reports_pump_alarms(hours: int = 24, limit: int = 100):
+    return storage.get_fast_alerts(hours=hours, limit=limit)
+
+
+@router.get("/api/reports/decision-quality")
+def reports_decision_quality(hours: int = 36, horizon_minutes: int = 240, auto_refresh: bool = True):
+    return storage.get_decision_quality_report(hours=hours, horizon_minutes=horizon_minutes, auto_refresh=auto_refresh)
+
+
+@router.get("/api/reports/reject-outcomes")
+def reports_reject_outcomes(hours: int = 36, horizon_minutes: int = 240, min_upside_pct: float = 5.0, limit: int = 100):
+    return storage.get_near_miss_report(hours=hours, horizon_minutes=horizon_minutes, min_upside_pct=min_upside_pct, limit=limit)
+
+
+@router.get("/api/reports/pattern-memory")
+def reports_pattern_memory(hours: int = 72, threshold_pct: float | None = None, limit: int = 100):
+    return storage.get_pattern_memory_report(hours=hours, threshold_pct=threshold_pct, limit=limit)
+
+
+@router.get("/api/reports/market-dna")
+def reports_market_dna(limit: int = 100, refresh: bool = False):
+    return storage.get_market_dna_report(limit=limit, refresh=refresh)

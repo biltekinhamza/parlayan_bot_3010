@@ -3,7 +3,7 @@ app:
   mode: paper
   port: 3010
   timezone: Europe/Istanbul
-  strategy_version: professional_paper_v44
+  strategy_version: professional_paper_v45
 binance:
   rest_base_url: https://api.binance.com
   request_timeout_seconds: 12
@@ -210,3 +210,34 @@ smart_trailing_ladder:
 
 decision_quality:
   enabled: true
+
+
+immediate_failure_exit:
+  enabled: true
+  check_after_minutes: 3
+  hard_loss_pct: -1.15
+  min_runup_pct: 0.12
+  min_velocity_score: 12
+  min_directional_score: 40
+  min_up_volume_ratio: 0.46
+
+pattern_memory:
+  enabled: true
+  thresholds_pct:
+  - 10
+  - 20
+  - 30
+  - 50
+  - 100
+  horizons_minutes:
+  - 15
+  - 30
+  - 60
+  - 240
+  dedupe_cooldown_minutes: 180
+  max_features_per_scan: 240
+
+market_dna:
+  enabled: true
+  lookback_days: 30
+  min_samples: 8

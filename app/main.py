@@ -14,7 +14,7 @@ from .db import db
 from .scanner import ScannerService
 from .storage import log_event, set_metadata, start_paper_session, get_current_session
 
-APP_VERSION = "1.3.0-professional-paper-v4.3"
+APP_VERSION = "1.4.5-professional-paper-v4.5"
 
 scanner_service: ScannerService | None = None
 scanner_task: asyncio.Task | None = None
