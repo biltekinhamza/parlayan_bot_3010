@@ -14,7 +14,7 @@ from .db import db
 from .scanner import ScannerService
 from .storage import log_event, set_metadata, start_paper_session, get_current_session
 
-APP_VERSION = "1.2.0-professional-paper-v4.1"
+APP_VERSION = "1.3.0-professional-paper-v4.3"
 
 scanner_service: ScannerService | None = None
 scanner_task: asyncio.Task | None = None
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     db.connect()
     config = config_store.get()
 
-    session = start_paper_session(config_snapshot=config, strategy_version=config.get("app", {}).get("strategy_version", "professional_paper_v41"))
+    session = start_paper_session(config_snapshot=config, strategy_version=config.get("app", {}).get("strategy_version", "professional_paper_v44"))
     scanner_service = ScannerService(config)
     set_metadata("scanner_state", {"running": False})
     log_event("INFO", "app", "Parlayan Bot başlatıldı", {

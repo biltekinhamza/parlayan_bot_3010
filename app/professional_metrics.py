@@ -63,6 +63,10 @@ def compute_pre_pump_metrics(feature: Any, previous: dict[str, Any] | None) -> d
     fake_risk = _f(feature.fake_pump_risk)
     liquidity_score = _f(feature.liquidity_score)
     momentum_score = _f(feature.momentum_score)
+    extra = getattr(feature, "extra", {}) or {}
+    directional_volume_score = _f(extra.get("directional_volume_score"), 50.0)
+    up_volume_ratio = _f(extra.get("up_volume_ratio"), 0.5)
+    close_location_score = _f(extra.get("close_location_score"), 0.5)
 
     # Açıklanabilir bileşenler (0-100'e yakın toplam)
     recovery_compression = 0.0
@@ -87,6 +91,10 @@ def compute_pre_pump_metrics(feature: Any, previous: dict[str, Any] | None) -> d
 
     position_component = _score_band(change_24h, 4.0, 30.0, 15.0, soft=18.0)
     quality_component = clamp((liquidity_score - fake_risk) / 3.0, -18, 18)
+    directional_component = clamp((directional_volume_score - 48.0) * 0.18, -7, 9)
+    if up_volume_ratio >= 0.58 and close_location_score >= 0.55:
+        directional_component += 3.0
+    directional_component = clamp(directional_component, -7, 12)
 
     score_delta_component = clamp(score_delta * 0.55, -6, 9)
     pre_score_trend_component = clamp((prev_pre_pump_score and (_f(prev_pre_pump_score) * 0.0)) + score_delta_component, -6, 9)

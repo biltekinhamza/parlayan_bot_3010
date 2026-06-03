@@ -17,7 +17,7 @@ class ScannerService:
     """
     Ana tarama döngüsü.
 
-    Profesyonel paper-trading araştırma döngüsü v4.1:
+    Profesyonel paper-trading araştırma döngüsü v4.4:
     1. Piyasayı tara → her coin için dakika dakika snapshot yaz
     2. Pre-pump / momentum fazını hesapla
     3. Aday listesini güncelle
@@ -61,6 +61,7 @@ class ScannerService:
             # 2. Özellikleri hesapla (parlayan skora göre sıralı)
             features = await self.feature_engine.build_features()
             storage.insert_market_snapshots(features)
+            market_regime = storage.compute_and_store_market_regime(features)
             for feature in features:
                 extra = feature.extra or {}
                 if extra.get("phase_changed"):
@@ -212,10 +213,18 @@ class ScannerService:
 
             # 4. Pozisyon güncellemesi (fiyatlar)
             latest_prices = {f.symbol: f.price for f in features}
-            self.trade_engine.update_open_trades(latest_prices)
+            self.trade_engine.update_open_trades(latest_prices, {f.symbol: f for f in features})
 
             # 5. Eski adayları temizle (24 saat)
             storage.expire_old_parlayan_candidates(max_hours=24)
+
+            outcome_refresh = {}
+            if self.config.get("research", {}).get("decision_quality_auto_refresh", True):
+                outcome_refresh = storage.refresh_decision_outcomes(
+                    hours=int(self.config.get("research", {}).get("decision_quality_hours", 36)),
+                    horizons=(60, 240),
+                    limit_per_horizon=int(self.config.get("research", {}).get("decision_quality_refresh_limit", 300)),
+                )
 
             summary = {
                 "ok": True,
@@ -223,6 +232,8 @@ class ScannerService:
                 "entered": entered,
                 "watched": watched,
                 "rejected": rejected,
+                "market_regime": market_regime,
+                "decision_outcomes_refresh": outcome_refresh,
                 "top_pre_pump": [
                     {
                         "symbol": f.symbol,

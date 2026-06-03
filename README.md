@@ -167,7 +167,7 @@ Gerçek para yatırım kararlarınızda profesyonel danışman görüşü alın.
 Kripto para piyasaları yüksek risk içerir.
 
 
-## Professional Paper v4.2
+## Professional Paper v4.3
 
 Yeni sürüm canlı emir göndermez. Eklenen başlıklar:
 

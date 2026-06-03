@@ -60,6 +60,9 @@ class DecisionEngine:
         fast_alarm_score = _f(extra.get("fast_alarm_score"), 0.0)
         momentum_acceleration = _f(extra.get("momentum_acceleration"), 0.0)
         price_velocity_1m = _f(extra.get("price_velocity_1m_pct"), 0.0)
+        directional_volume_score = _f(extra.get("directional_volume_score"), 50.0)
+        up_volume_ratio = _f(extra.get("up_volume_ratio"), 0.5)
+        close_location_score = _f(extra.get("close_location_score"), 0.5)
 
         blocked_entry_phases = {"FOMO", "LATE_FOMO", "DANGER", "DISTRIBUTION"}
         watchable_phases = {
@@ -133,6 +136,21 @@ class DecisionEngine:
         if feature.fake_pump_risk > _f(parlayan_cfg.get("max_fake_pump_risk_for_entry"), 72):
             entry_reasons.append(f"fake pump riski yüksek: {feature.fake_pump_risk:.1f}")
 
+        min_directional_score = _f(parlayan_cfg.get("min_directional_volume_score_for_entry"), 52.0)
+        min_up_volume_ratio = _f(parlayan_cfg.get("min_up_volume_ratio_for_entry"), 0.50)
+        if volume_ratio >= _f(parlayan_cfg.get("directional_filter_volume_ratio_trigger"), 1.8):
+            if directional_volume_score < min_directional_score or up_volume_ratio < min_up_volume_ratio:
+                entry_reasons.append(
+                    "directional volume zayıf: "
+                    f"dir_score={directional_volume_score:.1f} < {min_directional_score:.1f} "
+                    f"veya up_volume={up_volume_ratio:.2f} < {min_up_volume_ratio:.2f}"
+                )
+
+        if bool(extra.get("fast_alarm")) and close_location_score < _f(parlayan_cfg.get("min_close_location_for_fast_alarm"), 0.48):
+            entry_reasons.append(
+                f"fast alarm mum kapanış kalitesi düşük: close_location={close_location_score:.2f}"
+            )
+
         # v4 ideal momentum: HOME/EPIC/PORTAL entry tarafında görülen bölge.
         ideal_rsi_zone = _f(parlayan_cfg.get("ideal_rsi_min"), 52.0) <= rsi <= _f(parlayan_cfg.get("ideal_rsi_max"), 68.0)
         ideal_24h_zone = min_24h_entry <= change_24h <= max_24h_entry
@@ -175,6 +193,8 @@ class DecisionEngine:
             and velocity_score >= _f(parlayan_cfg.get("min_velocity_score_for_entry"), 58.0)
             and price_velocity_1m >= _f(parlayan_cfg.get("min_price_velocity_1m_for_entry"), 0.08)
             and momentum_acceleration >= _f(parlayan_cfg.get("min_momentum_acceleration_for_entry"), 0.0)
+            and directional_volume_score >= _f(parlayan_cfg.get("min_directional_volume_score_for_velocity_entry"), 55.0)
+            and up_volume_ratio >= _f(parlayan_cfg.get("min_up_volume_ratio_for_velocity_entry"), 0.52)
             and market_phase in {"VOLUME_WAKEUP", "EARLY_MOMENTUM", "ACCUMULATION_BREAKOUT", "MOMENTUM_EXPANSION"}
             and 45 <= rsi <= 70
             and change_24h <= min(max_24h_entry, 26.0)
@@ -186,7 +206,8 @@ class DecisionEngine:
                 f"faz={market_phase}, profile={v4_profile}, pre={pre_pump_score:.1f}, "
                 f"score={feature.parlayan_score:.1f}, rsi={rsi:.1f}, "
                 f"5m={change_5m:.2f}, 15m={change_15m:.2f}, 30m={change_30m:.2f}, 24h={change_24h:.2f}, "
-                f"velocity={velocity_score:.1f}, fast_alarm={fast_alarm_score:.1f}"
+                f"velocity={velocity_score:.1f}, fast_alarm={fast_alarm_score:.1f}, "
+                f"dir_score={directional_volume_score:.1f}, up_volume={up_volume_ratio:.2f}"
             )
 
         if entry_reasons:
@@ -223,6 +244,8 @@ class DecisionEngine:
                 f"30m={change_30m:.2f}%",
                 f"velocity_score={velocity_score:.1f}",
                 f"fast_alarm_score={fast_alarm_score:.1f}",
+                f"directional_volume_score={directional_volume_score:.1f}",
+                f"up_volume_ratio={up_volume_ratio:.2f}",
             ],
             "entry_ok": True,
             "entry_profile": entry_profile,

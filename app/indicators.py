@@ -46,6 +46,7 @@ def pct_change(old: float, new: float) -> float:
 
 
 def kline_features(klines: list[list]) -> dict:
+    opens = [safe_float(row[1]) for row in klines]
     closes = [safe_float(row[4]) for row in klines]
     highs = [safe_float(row[2]) for row in klines]
     lows = [safe_float(row[3]) for row in klines]
@@ -74,6 +75,43 @@ def kline_features(klines: list[list]) -> dict:
     body = max(abs(last_close - last_open), 1e-12)
     wick_body_ratio = upper_wick / body
 
+    # Directional volume proxy:
+    # Binance public klines do not tell us buyer-initiated volume directly.
+    # This proxy estimates whether recent volume is happening on green/upper-closing candles.
+    recent_n = 6 if len(closes) >= 6 else len(closes)
+    recent_indices = list(range(len(closes) - recent_n, len(closes))) if recent_n > 0 else []
+    recent_qv = sum(quote_volumes[i] for i in recent_indices) or 1.0
+    up_qv = 0.0
+    down_qv = 0.0
+    green_bars = 0
+    close_location_sum = 0.0
+    for i in recent_indices:
+        qv = quote_volumes[i]
+        o = opens[i]
+        c = closes[i]
+        h = highs[i]
+        l = lows[i]
+        if c >= o:
+            up_qv += qv
+            green_bars += 1
+        else:
+            down_qv += qv
+        rng = max(h - l, 1e-12)
+        close_location_sum += (c - l) / rng
+
+    up_volume_ratio = up_qv / recent_qv
+    down_volume_ratio = down_qv / recent_qv
+    directional_volume_delta = up_volume_ratio - down_volume_ratio
+    recent_green_bar_ratio = green_bars / recent_n if recent_n > 0 else 0.0
+    close_location_score = close_location_sum / recent_n if recent_n > 0 else 0.5
+    directional_volume_score = clamp(
+        up_volume_ratio * 55.0
+        + recent_green_bar_ratio * 25.0
+        + close_location_score * 20.0,
+        0.0,
+        100.0,
+    )
+
     return {
         "rsi": rsi_from_closes(closes),
         "price_change_5m_pct": change_5m,
@@ -84,6 +122,12 @@ def kline_features(klines: list[list]) -> dict:
         "volume_ratio": volume_ratio,
         "wick_body_ratio": wick_body_ratio,
         "last_close": last_close,
+        "up_volume_ratio": up_volume_ratio,
+        "down_volume_ratio": down_volume_ratio,
+        "directional_volume_delta": directional_volume_delta,
+        "recent_green_bar_ratio": recent_green_bar_ratio,
+        "close_location_score": close_location_score,
+        "directional_volume_score": directional_volume_score,
     }
 
 

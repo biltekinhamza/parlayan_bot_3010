@@ -284,3 +284,49 @@ CREATE TABLE IF NOT EXISTS paper_equity_curve (
 );
 CREATE INDEX IF NOT EXISTS idx_equity_curve_ts ON paper_equity_curve (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_equity_curve_session_ts ON paper_equity_curve (session_id, ts DESC);
+
+
+-- ─── V4.3 Decision Quality / Market Regime ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS decision_outcomes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    signal_event_id UUID NOT NULL REFERENCES signal_events(id) ON DELETE CASCADE,
+    horizon_minutes INTEGER NOT NULL,
+    evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    symbol TEXT NOT NULL,
+    event_ts TIMESTAMPTZ NOT NULL,
+    event_type TEXT NOT NULL,
+    action TEXT,
+    primary_reason TEXT,
+    market_phase TEXT,
+    v4_profile TEXT,
+    price_at_event NUMERIC NOT NULL,
+    latest_price NUMERIC,
+    max_price NUMERIC,
+    min_price NUMERIC,
+    max_upside_pct NUMERIC,
+    max_drawdown_pct NUMERIC,
+    latest_return_pct NUMERIC,
+    outcome_label TEXT NOT NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    UNIQUE(signal_event_id, horizon_minutes)
+);
+CREATE INDEX IF NOT EXISTS idx_decision_outcomes_reason ON decision_outcomes (primary_reason, horizon_minutes, outcome_label);
+CREATE INDEX IF NOT EXISTS idx_decision_outcomes_symbol_ts ON decision_outcomes (symbol, event_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_outcomes_event_type ON decision_outcomes (event_type, horizon_minutes, evaluated_at DESC);
+
+CREATE TABLE IF NOT EXISTS market_regime_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    regime TEXT NOT NULL,
+    confidence NUMERIC NOT NULL DEFAULT 0,
+    btc_24h_pct NUMERIC,
+    btc_1h_pct NUMERIC,
+    eth_24h_pct NUMERIC,
+    breadth_positive_pct NUMERIC,
+    breadth_strong_pct NUMERIC,
+    avg_alt_24h_pct NUMERIC,
+    danger_count INTEGER NOT NULL DEFAULT 0,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_market_regime_ts ON market_regime_snapshots (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_market_regime_regime_ts ON market_regime_snapshots (regime, ts DESC);

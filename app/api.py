@@ -248,3 +248,46 @@ def get_velocity_report(hours: int = 24, limit: int = 100):
 @router.get("/api/research/daily-report")
 def get_daily_report(day: str | None = None, all_time: bool = False):
     return storage.get_daily_signal_report(day=day, all_time=all_time)
+
+
+
+# ─── V4.3 Decision Quality / Near Miss / Market Regime ──────────────────────
+
+@router.post("/api/research/decision-outcomes/refresh")
+def refresh_decision_outcomes(hours: int = 36):
+    return storage.refresh_decision_outcomes(hours=hours)
+
+
+@router.get("/api/research/decision-quality")
+def get_decision_quality(hours: int = 36, horizon_minutes: int = 240, auto_refresh: bool = True):
+    return storage.get_decision_quality_report(hours=hours, horizon_minutes=horizon_minutes, auto_refresh=auto_refresh)
+
+
+@router.get("/api/research/danger-quality")
+def get_danger_quality(hours: int = 36, horizon_minutes: int = 240):
+    return storage.get_danger_filter_quality(hours=hours, horizon_minutes=horizon_minutes)
+
+
+@router.get("/api/research/near-misses")
+def get_near_misses(hours: int = 36, horizon_minutes: int = 240, min_upside_pct: float = 5.0, limit: int = 100):
+    return storage.get_near_miss_report(
+        hours=hours,
+        horizon_minutes=horizon_minutes,
+        min_upside_pct=min_upside_pct,
+        limit=limit,
+    )
+
+
+@router.get("/api/research/pre-pump-alert-quality")
+def get_pre_pump_alert_quality(hours: int = 36, horizon_minutes: int = 240, limit: int = 100):
+    return storage.get_pre_pump_alert_quality(hours=hours, horizon_minutes=horizon_minutes, limit=limit)
+
+
+@router.get("/api/research/market-regime")
+def get_market_regime(hours: int = 24):
+    return storage.get_market_regime_report(hours=hours)
+
+
+@router.get("/api/reports/v44-quality")
+def get_v44_quality_report(hours: int = 24, all_time: bool = True):
+    return storage.get_v44_trade_quality_report(hours=hours, all_time=all_time)

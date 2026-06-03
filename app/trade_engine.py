@@ -18,7 +18,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class TradeEngine:
     """
-    Professional paper trade engine v4.2.
+    Professional paper trade engine v4.4.
 
     Bu motor hâlâ gerçek emir göndermez. Amacı kendimizi kandırmayan paper-trade:
     - Eski session açık pozisyonları global riskte izler.
@@ -95,7 +95,7 @@ class TradeEngine:
         enriched_context.update({
             "raw_signal_price": price,
             "entry_fill_price": entry_fill_price,
-            "execution_model": "adverse_slippage_v4_2",
+            "execution_model": "adverse_slippage_v4_4",
             "slippage_details": slippage_details,
         })
 
@@ -178,7 +178,7 @@ class TradeEngine:
             "fill_price": fill,
         }
 
-    def update_open_trades(self, latest_prices: dict[str, float]) -> None:
+    def update_open_trades(self, latest_prices: dict[str, float], latest_features: dict[str, Any] | None = None) -> None:
         cfg = self.cfg
         now = datetime.now(timezone.utc)
         storage.cleanup_expired_cooldowns()
@@ -189,15 +189,32 @@ class TradeEngine:
             price = latest_prices.get(symbol)
             if price is None or price <= 0:
                 continue
-            self._update_one(trade, price, now, cfg)
+            self._update_one(trade, price, now, cfg, (latest_features or {}).get(symbol))
 
-    def _update_one(self, trade: dict[str, Any], price: float, now: datetime, cfg: dict[str, Any]) -> None:
+    def _update_one(self, trade: dict[str, Any], price: float, now: datetime, cfg: dict[str, Any], latest_feature: Any | None = None) -> None:
         symbol = trade["symbol"]
         entry = _f(trade["entry_price"])
         if entry <= 0:
             return
 
         context = dict(trade.get("context") or {})
+        live_extra: dict[str, Any] = {}
+        if latest_feature is not None:
+            live_extra = dict(getattr(latest_feature, "extra", {}) or {})
+            context["latest_metrics"] = {
+                "price": getattr(latest_feature, "price", price),
+                "rsi": getattr(latest_feature, "rsi", None),
+                "volume_ratio": getattr(latest_feature, "volume_ratio", None),
+                "parlayan_score": getattr(latest_feature, "parlayan_score", None),
+                "price_change_5m_pct": getattr(latest_feature, "price_change_5m_pct", None),
+                "price_change_15m_pct": getattr(latest_feature, "price_change_15m_pct", None),
+                "price_change_30m_pct": getattr(latest_feature, "price_change_30m_pct", None),
+                "market_phase": live_extra.get("market_phase"),
+                "velocity_score": live_extra.get("velocity_score"),
+                "fast_alarm_score": live_extra.get("fast_alarm_score"),
+                "directional_volume_score": live_extra.get("directional_volume_score"),
+                "up_volume_ratio": live_extra.get("up_volume_ratio"),
+            }
         current_max = max(_f(trade.get("max_price"), entry), price)
         max_gain_pct = ((current_max - entry) / entry) * 100
         current_gain_pct = ((price - entry) / entry) * 100
@@ -217,14 +234,42 @@ class TradeEngine:
         state["max_drawdown_pct"] = round(min(_f(state.get("max_drawdown_pct"), 0.0), current_net_gain_pct), 4)
 
         if current_gain_pct >= take_profit_pct:
-            exit_fill, fill_details = self._exit_fill(price, context, "TAKE_PROFIT")
-            net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
-            pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
-            self._record_close_context(trade, exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
-            storage.close_paper_trade(str(trade["id"]), exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt)
-            storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "TAKE_PROFIT", "trade_id": str(trade["id"]), **fill_details})
-            self._post_close(symbol, "TAKE_PROFIT", net_pnl, trade)
-            return
+            adaptive_decision = self._adaptive_profit_decision(
+                trade=trade,
+                context=context,
+                live_extra=live_extra,
+                current_gain_pct=current_gain_pct,
+                max_gain_pct=max_gain_pct,
+                fee_pct=fee_pct,
+                cfg=cfg,
+            )
+            if adaptive_decision["extend"]:
+                adaptive_stop = entry * (1 + (adaptive_decision["lock_pct"] + fee_pct) / 100)
+                if protected_stop is None or adaptive_stop > protected_stop:
+                    protected_stop = adaptive_stop
+                state["adaptive_profit_active"] = True
+                state["adaptive_profit_reason"] = adaptive_decision["reason"]
+                state["adaptive_profit_lock_pct"] = adaptive_decision["lock_pct"]
+                state["adaptive_profit_target_pct"] = adaptive_decision["target_pct"]
+                storage.update_trade_price(str(trade["id"]), price, current_max, protected_stop, state)
+                if current_gain_pct >= adaptive_decision["target_pct"]:
+                    exit_fill, fill_details = self._exit_fill(price, context, "ADAPTIVE_TAKE_PROFIT")
+                    net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
+                    pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+                    self._record_close_context(trade, exit_fill, "ADAPTIVE_TAKE_PROFIT", net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
+                    storage.close_paper_trade(str(trade["id"]), exit_fill, "ADAPTIVE_TAKE_PROFIT", net_pnl, pnl_usdt)
+                    storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "ADAPTIVE_TAKE_PROFIT", "trade_id": str(trade["id"]), **fill_details, "adaptive_decision": adaptive_decision})
+                    self._post_close(symbol, "ADAPTIVE_TAKE_PROFIT", net_pnl, trade)
+                    return
+            else:
+                exit_fill, fill_details = self._exit_fill(price, context, "TAKE_PROFIT")
+                net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
+                pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+                self._record_close_context(trade, exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
+                storage.close_paper_trade(str(trade["id"]), exit_fill, "TAKE_PROFIT", net_pnl, pnl_usdt)
+                storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "TAKE_PROFIT", "trade_id": str(trade["id"]), **fill_details})
+                self._post_close(symbol, "TAKE_PROFIT", net_pnl, trade)
+                return
 
         be_start = _f(cfg.get("break_even_start_pct", 3.5))
         if max_gain_pct >= be_start:
@@ -265,7 +310,36 @@ class TradeEngine:
         state["active_stop"] = round(active_stop, 8)
         state["current_unrealized_pct"] = round(current_gain_pct - fee_pct, 4)
 
+        follow_decision = self._follow_through_decision(
+            trade=trade,
+            context=context,
+            live_extra=live_extra,
+            age_minutes=age_minutes,
+            current_net_gain_pct=current_net_gain_pct,
+            max_runup_pct=_f(state.get("max_runup_pct"), max_gain_pct - fee_pct),
+            max_drawdown_pct=_f(state.get("max_drawdown_pct"), current_net_gain_pct),
+            cfg=cfg,
+        )
+        state["follow_through_score"] = follow_decision["score"]
+        state["follow_through_reason"] = follow_decision["reason"]
         storage.update_trade_price(str(trade["id"]), price, current_max, protected_stop, state)
+
+        if follow_decision["exit"]:
+            reason = follow_decision["exit_reason"]
+            exit_fill, fill_details = self._exit_fill(price, context, reason)
+            net_pnl = ((exit_fill - entry) / entry * 100) - fee_pct
+            pnl_usdt = _f(trade["quote_size"]) * net_pnl / 100
+            self._record_close_context(trade, exit_fill, reason, net_pnl, pnl_usdt, fee_pct, fill_details, state, now)
+            storage.close_paper_trade(str(trade["id"]), exit_fill, reason, net_pnl, pnl_usdt)
+            storage.insert_signal_event(symbol, "EXIT", "WARNING", net_pnl, exit_fill, {
+                "reason": reason,
+                "trade_id": str(trade["id"]),
+                "age_minutes": round(age_minutes, 2),
+                "follow_through": follow_decision,
+                **fill_details,
+            })
+            self._post_close(symbol, reason, net_pnl, trade)
+            return
 
         grace_minutes = self._phase_grace_minutes(context, cfg)
         stop_grace_active = protected_stop is None and age_minutes < grace_minutes
@@ -302,6 +376,139 @@ class TradeEngine:
             storage.close_paper_trade(str(trade["id"]), exit_fill, "MAX_TIME_EXIT", net_pnl, pnl_usdt)
             storage.insert_signal_event(symbol, "EXIT", "INFO", net_pnl, exit_fill, {"reason": "MAX_TIME_EXIT", "trade_id": str(trade["id"]), **fill_details})
             self._post_close(symbol, "MAX_TIME_EXIT", net_pnl, trade)
+
+
+    def _follow_through_decision(
+        self,
+        trade: dict[str, Any],
+        context: dict[str, Any],
+        live_extra: dict[str, Any],
+        age_minutes: float,
+        current_net_gain_pct: float,
+        max_runup_pct: float,
+        max_drawdown_pct: float,
+        cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        V4.4 Follow Through Engine.
+        Profesyonel trader mantığı: doğru breakout ilk dakikalarda en azından küçük bir
+        onay üretmelidir. Max runup yoksa ve fiyat geri sarkıyorsa stopu beklemeden çık.
+        """
+        ft_cfg = self.config.get("follow_through", {})
+        if not ft_cfg.get("enabled", True):
+            return {"exit": False, "exit_reason": None, "score": 50.0, "reason": "disabled"}
+
+        check_min = _f(ft_cfg.get("check_after_minutes"), 10.0)
+        min_runup = _f(ft_cfg.get("min_runup_pct"), 0.35)
+        max_loss = _f(ft_cfg.get("max_loss_pct"), -0.85)
+        velocity_floor = _f(ft_cfg.get("velocity_score_floor"), 18.0)
+        directional_floor = _f(ft_cfg.get("directional_score_floor"), 45.0)
+
+        velocity_score = _f(live_extra.get("velocity_score"), _f((context.get("professional_metrics") or {}).get("velocity_score"), 0.0))
+        directional_score = _f(live_extra.get("directional_volume_score"), _f((context.get("professional_metrics") or {}).get("directional_volume_score"), 50.0))
+        up_volume = _f(live_extra.get("up_volume_ratio"), _f((context.get("professional_metrics") or {}).get("up_volume_ratio"), 0.5))
+        momentum_accel = _f(live_extra.get("momentum_acceleration"), _f((context.get("professional_metrics") or {}).get("momentum_acceleration"), 0.0))
+
+        score = 50.0
+        score += min(max_runup_pct * 14.0, 24.0)
+        score += min(max(current_net_gain_pct, -3.0) * 8.0, 18.0)
+        score += min(max(velocity_score - 30.0, -30.0) * 0.35, 16.0)
+        score += min(max(directional_score - 50.0, -30.0) * 0.35, 14.0)
+        score += min(max(up_volume - 0.52, -0.25) * 55.0, 12.0)
+        score += min(max(momentum_accel, -1.0) * 18.0, 10.0)
+        score = round(max(0.0, min(100.0, score)), 2)
+
+        if age_minutes < check_min:
+            return {"exit": False, "exit_reason": None, "score": score, "reason": "warming_up"}
+
+        failed_runup = max_runup_pct < min_runup
+        underwater = current_net_gain_pct <= max_loss
+        weak_flow = velocity_score < velocity_floor or directional_score < directional_floor or up_volume < 0.48
+
+        if failed_runup and underwater:
+            return {
+                "exit": True,
+                "exit_reason": "FAILED_BREAKOUT",
+                "score": score,
+                "reason": f"max_runup={max_runup_pct:.2f}% < {min_runup:.2f}% ve pnl={current_net_gain_pct:.2f}% <= {max_loss:.2f}%",
+                "weak_flow": weak_flow,
+                "velocity_score": velocity_score,
+                "directional_volume_score": directional_score,
+                "up_volume_ratio": up_volume,
+            }
+
+        stale_min = _f(ft_cfg.get("stale_after_minutes"), 24.0)
+        stale_runup = _f(ft_cfg.get("stale_min_runup_pct"), 0.75)
+        if age_minutes >= stale_min and max_runup_pct < stale_runup and current_net_gain_pct < 0.05 and weak_flow:
+            return {
+                "exit": True,
+                "exit_reason": "STALE_MOMENTUM_EXIT",
+                "score": score,
+                "reason": f"{age_minutes:.1f} dk sonra takip yok: runup={max_runup_pct:.2f}%, flow weak",
+                "weak_flow": weak_flow,
+                "velocity_score": velocity_score,
+                "directional_volume_score": directional_score,
+                "up_volume_ratio": up_volume,
+            }
+
+        return {"exit": False, "exit_reason": None, "score": score, "reason": "healthy_or_wait"}
+
+    def _trend_persistence_score(self, context: dict[str, Any], live_extra: dict[str, Any]) -> float:
+        metrics = context.get("professional_metrics") or {}
+        pre = _f(context.get("pre_pump_score"), _f(metrics.get("pre_pump_score"), 0.0))
+        velocity = _f(live_extra.get("velocity_score"), _f(metrics.get("velocity_score"), 0.0))
+        directional = _f(live_extra.get("directional_volume_score"), _f(metrics.get("directional_volume_score"), 50.0))
+        up_volume = _f(live_extra.get("up_volume_ratio"), _f(metrics.get("up_volume_ratio"), 0.5))
+        momentum_accel = _f(live_extra.get("momentum_acceleration"), _f(metrics.get("momentum_acceleration"), 0.0))
+        score = 0.0
+        score += min(pre, 100.0) * 0.28
+        score += min(velocity, 100.0) * 0.25
+        score += min(max(directional, 0.0), 100.0) * 0.22
+        score += max(0.0, min((up_volume - 0.45) * 120.0, 18.0))
+        score += max(0.0, min(momentum_accel * 24.0, 12.0))
+        return round(max(0.0, min(100.0, score)), 2)
+
+    def _adaptive_profit_decision(
+        self,
+        trade: dict[str, Any],
+        context: dict[str, Any],
+        live_extra: dict[str, Any],
+        current_gain_pct: float,
+        max_gain_pct: float,
+        fee_pct: float,
+        cfg: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        V4.4 Adaptive Profit Engine.
+        Büyük kazananları sabit take-profitte öldürmemek için trend sürüyorsa hedefi uzatır,
+        ama kârın büyük kısmını stop ile kilitler.
+        """
+        ap_cfg = self.config.get("adaptive_profit", {})
+        if not ap_cfg.get("enabled", True):
+            return {"extend": False, "reason": "disabled", "lock_pct": 0.0, "target_pct": _f(trade.get("take_profit_pct"), _f(cfg.get("take_profit_pct"), 15.0))}
+
+        persistence = self._trend_persistence_score(context, live_extra)
+        min_persistence = _f(ap_cfg.get("min_trend_persistence_score"), 66.0)
+        target_pct = _f(ap_cfg.get("extended_take_profit_pct"), 24.0)
+        lock_pct = _f(ap_cfg.get("lock_profit_pct"), 10.0)
+        giveback_pct = _f(ap_cfg.get("max_giveback_from_peak_pct"), 4.2)
+
+        if persistence >= min_persistence and max_gain_pct - current_gain_pct <= giveback_pct:
+            return {
+                "extend": True,
+                "reason": f"trend persists: score={persistence:.1f}",
+                "lock_pct": lock_pct,
+                "target_pct": target_pct,
+                "trend_persistence_score": persistence,
+            }
+
+        return {
+            "extend": False,
+            "reason": f"trend weak: score={persistence:.1f}",
+            "lock_pct": 0.0,
+            "target_pct": _f(trade.get("take_profit_pct"), _f(cfg.get("take_profit_pct"), 15.0)),
+            "trend_persistence_score": persistence,
+        }
 
     def _smart_trailing_ladder(
         self,
@@ -375,7 +582,7 @@ class TradeEngine:
             "max_runup_pct": state.get("max_runup_pct"),
             "max_drawdown_pct": state.get("max_drawdown_pct"),
             "time_in_trade_min": round(time_in_trade_min, 2),
-            "paper_integrity_model": "net_pnl_after_fill_fee_slippage_v4_2",
+            "paper_integrity_model": "net_pnl_after_fill_fee_slippage_v4_4",
         })
 
     def _phase_stop_loss_pct(self, trade: dict[str, Any], context: dict[str, Any], cfg: dict[str, Any]) -> float:

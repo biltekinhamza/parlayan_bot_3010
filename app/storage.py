@@ -5,7 +5,7 @@ from typing import Any
 
 from .db import db, jsonb
 
-STRATEGY_VERSION = "professional_paper_v4"
+STRATEGY_VERSION = "professional_paper_v44"
 MODE = "paper"
 
 
@@ -773,7 +773,7 @@ def get_winning_pattern_report(all_time: bool = False) -> dict[str, Any]:
 # Amaç: session restart sonrası eski açık pozisyonları riskten düşürmemek,
 # unrealized PnL'i hesaba katmak ve Pump Detective v2 raporlarını üretmek.
 
-STRATEGY_VERSION = "professional_paper_v41"
+STRATEGY_VERSION = "professional_paper_v44"
 
 
 def start_paper_session(config_snapshot: dict[str, Any] | None = None, strategy_version: str = STRATEGY_VERSION) -> dict[str, Any]:
@@ -1138,9 +1138,9 @@ def get_pump_detective_v2_report(threshold_pct: float = 30.0, limit: int = 100) 
     }
 
 
-# ─── V4.2 Velocity / Paper Integrity Reports ─────────────────────────────────
+# ─── V4.3 Velocity / Paper Integrity Reports ─────────────────────────────────
 
-STRATEGY_VERSION = "professional_paper_v42"
+STRATEGY_VERSION = "professional_paper_v44"
 
 
 def patch_trade_context(trade_id: str, patch: dict[str, Any]) -> None:
@@ -1300,4 +1300,505 @@ def get_velocity_research_report(hours: int = 24, limit: int = 100) -> dict[str,
         "version": "velocity_research_v42",
         "hours": hours,
         "rows": rows,
+    }
+
+
+# ─── V4.3 Decision Quality / Market Regime / Near Miss ───────────────────────
+
+def _num(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _pct_change(start: float, end: float | None) -> float | None:
+    if start <= 0 or end is None:
+        return None
+    return ((float(end) - start) / start) * 100.0
+
+
+def _primary_reason(details: dict[str, Any] | None) -> str:
+    details = details or {}
+    reason = details.get("reason")
+    if reason:
+        return str(reason)
+    reasons = details.get("reasons")
+    if isinstance(reasons, list) and reasons:
+        return str(reasons[0])
+    action = details.get("action")
+    if action:
+        return str(action)
+    return "UNKNOWN"
+
+
+def _outcome_label(max_upside_pct: float, max_drawdown_pct: float, latest_return_pct: float) -> str:
+    if max_upside_pct >= 10:
+        return "MISSED_BIG_WINNER"
+    if max_upside_pct >= 5:
+        return "MISSED_WINNER"
+    if latest_return_pct <= -3 or max_drawdown_pct <= -5:
+        return "GOOD_REJECT_OR_RISK_AVOIDED"
+    if max_upside_pct < 2:
+        return "LOW_OPPORTUNITY"
+    return "NEUTRAL"
+
+
+def compute_and_store_market_regime(features: list[Any]) -> dict[str, Any]:
+    """
+    V4.3 market regime engine.
+    Coin sinyalini genel piyasa şartlarından ayırmak için BTC/ETH ve piyasa genişliğini ölçer.
+    """
+    if not features:
+        return {"regime": "NO_DATA", "confidence": 0.0, "details": {}}
+
+    latest = {getattr(f, "symbol", ""): f for f in features}
+    btc = latest.get("BTCUSDT")
+    eth = latest.get("ETHUSDT")
+
+    btc_24h = _num(getattr(btc, "price_change_24h_pct", None)) if btc else 0.0
+    btc_1h = _num((getattr(btc, "extra", {}) or {}).get("price_change_1h_pct")) if btc else 0.0
+    eth_24h = _num(getattr(eth, "price_change_24h_pct", None)) if eth else 0.0
+
+    alt_features = [f for f in features if getattr(f, "symbol", "") not in {"BTCUSDT", "ETHUSDT"}]
+    total = max(len(alt_features), 1)
+    positive = sum(1 for f in alt_features if _num(getattr(f, "price_change_24h_pct", None)) > 0)
+    strong = sum(1 for f in alt_features if _num(getattr(f, "price_change_24h_pct", None)) >= 5)
+    danger = sum(1 for f in alt_features if str((getattr(f, "extra", {}) or {}).get("market_phase") or getattr(f, "bot_state", "")) == "DANGER")
+    avg_alt = sum(_num(getattr(f, "price_change_24h_pct", None)) for f in alt_features) / total
+
+    breadth_positive_pct = positive / total * 100.0
+    breadth_strong_pct = strong / total * 100.0
+
+    if btc_24h <= -2.0 and breadth_positive_pct < 45:
+        regime = "RISK_OFF"
+        confidence = min(95.0, 55.0 + abs(btc_24h) * 6.0 + (45.0 - breadth_positive_pct) * 0.5)
+    elif btc_24h > 1.0 and breadth_strong_pct >= 18 and avg_alt > 1.5:
+        regime = "ALT_RISK_ON"
+        confidence = min(95.0, 50.0 + breadth_strong_pct + max(avg_alt, 0.0) * 2.0)
+    elif abs(btc_24h) <= 1.5 and breadth_strong_pct >= 12:
+        regime = "ALT_ROTATION"
+        confidence = min(90.0, 48.0 + breadth_strong_pct * 1.2)
+    elif danger / total > 0.18:
+        regime = "HOT_FOMO_MARKET"
+        confidence = min(90.0, 45.0 + (danger / total) * 130.0)
+    else:
+        regime = "NEUTRAL"
+        confidence = 55.0
+
+    previous = get_metadata("market_regime", {})
+    details = {
+        "total_symbols": len(features),
+        "alt_symbols": len(alt_features),
+        "btc_24h_pct": round(btc_24h, 4),
+        "btc_1h_pct": round(btc_1h, 4),
+        "eth_24h_pct": round(eth_24h, 4),
+        "breadth_positive_pct": round(breadth_positive_pct, 4),
+        "breadth_strong_pct": round(breadth_strong_pct, 4),
+        "avg_alt_24h_pct": round(avg_alt, 4),
+        "danger_count": danger,
+        "previous_regime": previous.get("regime"),
+    }
+
+    db.execute(
+        """
+        INSERT INTO market_regime_snapshots(
+            regime, confidence, btc_24h_pct, btc_1h_pct, eth_24h_pct,
+            breadth_positive_pct, breadth_strong_pct, avg_alt_24h_pct,
+            danger_count, details
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """,
+        (
+            regime, confidence, btc_24h, btc_1h, eth_24h,
+            breadth_positive_pct, breadth_strong_pct, avg_alt,
+            danger, jsonb(details),
+        ),
+    )
+    current = {"regime": regime, "confidence": round(confidence, 2), "details": details, "ts": utc_now()}
+    set_metadata("market_regime", current)
+
+    if previous.get("regime") and previous.get("regime") != regime:
+        insert_signal_event(
+            symbol="MARKET",
+            event_type="MARKET_REGIME_CHANGE",
+            severity="WARNING" if regime in {"RISK_OFF", "HOT_FOMO_MARKET"} else "INFO",
+            score=confidence,
+            price=None,
+            details={"from": previous.get("regime"), "to": regime, **details},
+        )
+    return current
+
+
+def get_market_regime_report(hours: int = 24) -> dict[str, Any]:
+    rows = db.fetch_all(
+        """
+        SELECT *
+        FROM market_regime_snapshots
+        WHERE ts > now() - (%s || ' hours')::interval
+        ORDER BY ts DESC
+        LIMIT 500
+        """,
+        (hours,),
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        regime = str(row.get("regime") or "UNKNOWN")
+        counts[regime] = counts.get(regime, 0) + 1
+    return {
+        "current": get_metadata("market_regime", {}),
+        "hours": hours,
+        "regime_counts": counts,
+        "recent": rows[:50],
+    }
+
+
+def refresh_decision_outcomes(
+    hours: int = 36,
+    horizons: tuple[int, ...] = (60, 240, 720),
+    limit_per_horizon: int = 1500,
+) -> dict[str, Any]:
+    """
+    Reject/alert/entry kararlarının sonradan ne olduğunu ölçer.
+    Bu modül filtreleri tahminle değil sonuçla kalibre etmek için kullanılır.
+    """
+    inserted_total = 0
+    per_horizon: dict[str, int] = {}
+
+    for horizon in horizons:
+        events = db.fetch_all(
+            """
+            SELECT e.*
+            FROM signal_events e
+            WHERE e.ts > now() - (%s || ' hours')::interval
+              AND e.ts < now() - (%s || ' minutes')::interval
+              AND e.price IS NOT NULL
+              AND e.price > 0
+              AND e.event_type IN (
+                  'DECISION_REJECT',
+                  'DECISION_ACCEPT',
+                  'PRE_PUMP_ALERT',
+                  'FAST_PUMP_ALERT',
+                  'TRADE_REJECT',
+                  'PAPER_ENTRY'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM decision_outcomes o
+                  WHERE o.signal_event_id = e.id
+                    AND o.horizon_minutes = %s
+              )
+            ORDER BY e.ts DESC
+            LIMIT %s
+            """,
+            (hours, horizon, horizon, limit_per_horizon),
+        )
+
+        inserted = 0
+        for event in events:
+            price_at_event = _num(event.get("price"))
+            if price_at_event <= 0:
+                continue
+
+            stats = db.fetch_one(
+                """
+                WITH future AS (
+                    SELECT ts, price
+                    FROM market_snapshots
+                    WHERE symbol=%s
+                      AND ts >= %s
+                      AND ts <= %s + (%s || ' minutes')::interval
+                      AND price > 0
+                    ORDER BY ts ASC
+                ),
+                latest AS (
+                    SELECT price AS latest_price
+                    FROM future
+                    ORDER BY ts DESC
+                    LIMIT 1
+                )
+                SELECT
+                    MAX(price) AS max_price,
+                    MIN(price) AS min_price,
+                    (SELECT latest_price FROM latest) AS latest_price,
+                    COUNT(*) AS sample_count
+                FROM future
+                """,
+                (event.get("symbol"), event.get("ts"), event.get("ts"), horizon),
+            )
+            if not stats or int(stats.get("sample_count") or 0) == 0:
+                continue
+
+            max_price = _num(stats.get("max_price"), price_at_event)
+            min_price = _num(stats.get("min_price"), price_at_event)
+            latest_price = _num(stats.get("latest_price"), price_at_event)
+            max_upside_pct = _pct_change(price_at_event, max_price) or 0.0
+            max_drawdown_pct = _pct_change(price_at_event, min_price) or 0.0
+            latest_return_pct = _pct_change(price_at_event, latest_price) or 0.0
+
+            details = dict(event.get("details") or {})
+            action = str(details.get("action") or event.get("event_type") or "")
+            primary_reason = _primary_reason(details)
+            market_phase = str(details.get("market_phase") or (details.get("extra") or {}).get("market_phase") or "")
+            v4_profile = str(details.get("v4_profile") or (details.get("extra") or {}).get("v4_profile") or "")
+            label = _outcome_label(max_upside_pct, max_drawdown_pct, latest_return_pct)
+
+            db.execute(
+                """
+                INSERT INTO decision_outcomes(
+                    signal_event_id, horizon_minutes, symbol, event_ts, event_type,
+                    action, primary_reason, market_phase, v4_profile,
+                    price_at_event, latest_price, max_price, min_price,
+                    max_upside_pct, max_drawdown_pct, latest_return_pct,
+                    outcome_label, details
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(signal_event_id, horizon_minutes) DO NOTHING
+                """,
+                (
+                    event.get("id"), horizon, event.get("symbol"), event.get("ts"), event.get("event_type"),
+                    action, primary_reason, market_phase, v4_profile,
+                    price_at_event, latest_price, max_price, min_price,
+                    round(max_upside_pct, 6), round(max_drawdown_pct, 6), round(latest_return_pct, 6),
+                    label, jsonb({"event_details": details, "sample_count": stats.get("sample_count")}),
+                ),
+            )
+            inserted += 1
+
+        per_horizon[str(horizon)] = inserted
+        inserted_total += inserted
+
+    return {"inserted_total": inserted_total, "per_horizon": per_horizon, "horizons": list(horizons), "hours": hours}
+
+
+def get_decision_quality_report(hours: int = 36, horizon_minutes: int = 240, auto_refresh: bool = True) -> dict[str, Any]:
+    if auto_refresh:
+        refresh_decision_outcomes(hours=hours, horizons=(horizon_minutes,), limit_per_horizon=2000)
+
+    rows = db.fetch_all(
+        """
+        SELECT
+            event_type,
+            action,
+            primary_reason,
+            market_phase,
+            COUNT(*) AS decisions,
+            COUNT(*) FILTER (WHERE outcome_label IN ('MISSED_BIG_WINNER','MISSED_WINNER')) AS missed_winners,
+            COUNT(*) FILTER (WHERE outcome_label='GOOD_REJECT_OR_RISK_AVOIDED') AS good_rejects,
+            ROUND(AVG(max_upside_pct), 4) AS avg_max_upside_pct,
+            ROUND(AVG(max_drawdown_pct), 4) AS avg_max_drawdown_pct,
+            ROUND(AVG(latest_return_pct), 4) AS avg_latest_return_pct,
+            ROUND(MAX(max_upside_pct), 4) AS best_after_decision_pct,
+            ROUND(MIN(max_drawdown_pct), 4) AS worst_after_decision_pct
+        FROM decision_outcomes
+        WHERE event_ts > now() - (%s || ' hours')::interval
+          AND horizon_minutes=%s
+        GROUP BY event_type, action, primary_reason, market_phase
+        ORDER BY missed_winners DESC, decisions DESC
+        LIMIT 120
+        """,
+        (hours, horizon_minutes),
+    )
+
+    headline = db.fetch_one(
+        """
+        SELECT
+            COUNT(*) AS evaluated,
+            COUNT(*) FILTER (WHERE event_type='DECISION_REJECT') AS rejects,
+            COUNT(*) FILTER (WHERE event_type='DECISION_REJECT' AND outcome_label IN ('MISSED_BIG_WINNER','MISSED_WINNER')) AS missed_rejects,
+            COUNT(*) FILTER (WHERE event_type='DECISION_REJECT' AND outcome_label='GOOD_REJECT_OR_RISK_AVOIDED') AS good_rejects,
+            ROUND(AVG(max_upside_pct), 4) AS avg_max_upside_pct,
+            ROUND(AVG(max_drawdown_pct), 4) AS avg_max_drawdown_pct
+        FROM decision_outcomes
+        WHERE event_ts > now() - (%s || ' hours')::interval
+          AND horizon_minutes=%s
+        """,
+        (hours, horizon_minutes),
+    )
+
+    return {
+        "version": "decision_quality_v43",
+        "hours": hours,
+        "horizon_minutes": horizon_minutes,
+        "headline": dict(headline) if headline else {},
+        "by_reason": rows,
+    }
+
+
+def get_danger_filter_quality(hours: int = 36, horizon_minutes: int = 240) -> dict[str, Any]:
+    if True:
+        refresh_decision_outcomes(hours=hours, horizons=(horizon_minutes,), limit_per_horizon=2000)
+
+    rows = db.fetch_all(
+        """
+        SELECT
+            primary_reason,
+            market_phase,
+            COUNT(*) AS decisions,
+            COUNT(*) FILTER (WHERE outcome_label IN ('MISSED_BIG_WINNER','MISSED_WINNER')) AS missed_winners,
+            COUNT(*) FILTER (WHERE outcome_label='GOOD_REJECT_OR_RISK_AVOIDED') AS good_rejects,
+            ROUND(AVG(max_upside_pct), 4) AS avg_max_upside_pct,
+            ROUND(MAX(max_upside_pct), 4) AS max_upside_pct,
+            ROUND(AVG(max_drawdown_pct), 4) AS avg_max_drawdown_pct
+        FROM decision_outcomes
+        WHERE event_ts > now() - (%s || ' hours')::interval
+          AND horizon_minutes=%s
+          AND event_type='DECISION_REJECT'
+          AND (
+              primary_reason ILIKE '%%DANGER%%'
+              OR market_phase='DANGER'
+          )
+        GROUP BY primary_reason, market_phase
+        ORDER BY missed_winners DESC, decisions DESC
+        """,
+        (hours, horizon_minutes),
+    )
+
+    total = sum(int(r.get("decisions") or 0) for r in rows)
+    missed = sum(int(r.get("missed_winners") or 0) for r in rows)
+    good = sum(int(r.get("good_rejects") or 0) for r in rows)
+    return {
+        "version": "danger_filter_quality_v43",
+        "hours": hours,
+        "horizon_minutes": horizon_minutes,
+        "total_danger_rejects_evaluated": total,
+        "missed_winner_count": missed,
+        "good_reject_count": good,
+        "missed_winner_rate_pct": round((missed / total * 100.0), 3) if total else 0.0,
+        "good_reject_rate_pct": round((good / total * 100.0), 3) if total else 0.0,
+        "rows": rows,
+    }
+
+
+def get_near_miss_report(hours: int = 36, horizon_minutes: int = 240, min_upside_pct: float = 5.0, limit: int = 100) -> dict[str, Any]:
+    refresh_decision_outcomes(hours=hours, horizons=(horizon_minutes,), limit_per_horizon=2500)
+    rows = db.fetch_all(
+        """
+        SELECT
+            o.*,
+            e.details AS event_details
+        FROM decision_outcomes o
+        JOIN signal_events e ON e.id=o.signal_event_id
+        WHERE o.event_ts > now() - (%s || ' hours')::interval
+          AND o.horizon_minutes=%s
+          AND o.event_type IN ('DECISION_REJECT','TRADE_REJECT')
+          AND o.max_upside_pct >= %s
+        ORDER BY o.max_upside_pct DESC, o.event_ts DESC
+        LIMIT %s
+        """,
+        (hours, horizon_minutes, min_upside_pct, limit),
+    )
+    return {
+        "version": "near_miss_v43",
+        "hours": hours,
+        "horizon_minutes": horizon_minutes,
+        "min_upside_pct": min_upside_pct,
+        "count": len(rows),
+        "rows": rows,
+    }
+
+
+def get_pre_pump_alert_quality(hours: int = 36, horizon_minutes: int = 240, limit: int = 100) -> dict[str, Any]:
+    refresh_decision_outcomes(hours=hours, horizons=(horizon_minutes,), limit_per_horizon=2500)
+    summary = db.fetch_all(
+        """
+        SELECT
+            event_type,
+            COUNT(*) AS alerts,
+            COUNT(*) FILTER (WHERE max_upside_pct >= 3) AS hit_3pct,
+            COUNT(*) FILTER (WHERE max_upside_pct >= 5) AS hit_5pct,
+            COUNT(*) FILTER (WHERE max_upside_pct >= 10) AS hit_10pct,
+            ROUND(AVG(max_upside_pct), 4) AS avg_max_upside_pct,
+            ROUND(AVG(max_drawdown_pct), 4) AS avg_max_drawdown_pct,
+            ROUND(MAX(max_upside_pct), 4) AS best_after_alert_pct
+        FROM decision_outcomes
+        WHERE event_ts > now() - (%s || ' hours')::interval
+          AND horizon_minutes=%s
+          AND event_type IN ('PRE_PUMP_ALERT','FAST_PUMP_ALERT')
+        GROUP BY event_type
+        ORDER BY alerts DESC
+        """,
+        (hours, horizon_minutes),
+    )
+    examples = db.fetch_all(
+        """
+        SELECT o.*, e.details AS event_details
+        FROM decision_outcomes o
+        JOIN signal_events e ON e.id=o.signal_event_id
+        WHERE o.event_ts > now() - (%s || ' hours')::interval
+          AND o.horizon_minutes=%s
+          AND o.event_type IN ('PRE_PUMP_ALERT','FAST_PUMP_ALERT')
+        ORDER BY o.max_upside_pct DESC
+        LIMIT %s
+        """,
+        (hours, horizon_minutes, limit),
+    )
+    return {
+        "version": "pre_pump_alert_quality_v43",
+        "hours": hours,
+        "horizon_minutes": horizon_minutes,
+        "summary": summary,
+        "best_alerts": examples,
+    }
+
+
+def get_v44_trade_quality_report(hours: int = 24, all_time: bool = True) -> dict[str, Any]:
+    """
+    V4.4: zarar azaltma + kâr maksimize modüllerinin etkisini ölçer.
+    Özellikle FAILED_BREAKOUT / STALE_MOMENTUM_EXIT / ADAPTIVE_TAKE_PROFIT çıktılarını izler.
+    """
+    session_filter, params = _session_filter_sql(all_time=all_time)
+    rows = db.fetch_all(
+        f"""
+        SELECT
+            symbol, strategy_version, status, entry_ts, exit_ts, exit_reason,
+            pnl_pct, pnl_quote, context, protection_state,
+            COALESCE((context->>'max_runup_pct')::numeric, 0) AS max_runup_pct,
+            COALESCE((context->>'max_drawdown_pct')::numeric, 0) AS max_drawdown_pct,
+            COALESCE((context->>'time_in_trade_min')::numeric, 0) AS time_in_trade_min,
+            COALESCE((protection_state->>'follow_through_score')::numeric, NULL) AS follow_through_score,
+            protection_state->>'follow_through_reason' AS follow_through_reason,
+            protection_state->>'adaptive_profit_reason' AS adaptive_profit_reason
+        FROM paper_trades
+        WHERE entry_ts > now() - (%s || ' hours')::interval {session_filter}
+        ORDER BY entry_ts DESC
+        """,
+        (hours, *params),
+    )
+
+    closed = [r for r in rows if r.get("status") == "CLOSED"]
+    losses = [r for r in closed if _num(r.get("pnl_pct")) < 0]
+    wins = [r for r in closed if _num(r.get("pnl_pct")) > 0]
+    early_exits = [r for r in closed if r.get("exit_reason") in {"FAILED_BREAKOUT", "STALE_MOMENTUM_EXIT"}]
+    adaptive_wins = [r for r in closed if r.get("exit_reason") == "ADAPTIVE_TAKE_PROFIT"]
+
+    by_reason: dict[str, dict[str, Any]] = {}
+    for row in closed:
+        reason = row.get("exit_reason") or "UNKNOWN"
+        bucket = by_reason.setdefault(reason, {"count": 0, "sum_pnl": 0.0, "wins": 0})
+        pnl = _num(row.get("pnl_pct"))
+        bucket["count"] += 1
+        bucket["sum_pnl"] += pnl
+        if pnl > 0:
+            bucket["wins"] += 1
+
+    for bucket in by_reason.values():
+        count = max(bucket["count"], 1)
+        bucket["avg_pnl_pct"] = round(bucket["sum_pnl"] / count, 4)
+        bucket["win_rate_pct"] = round(bucket["wins"] / count * 100.0, 2)
+        bucket["sum_pnl"] = round(bucket["sum_pnl"], 4)
+
+    return {
+        "hours": hours,
+        "total_trades": len(rows),
+        "closed_trades": len(closed),
+        "open_trades": len([r for r in rows if r.get("status") == "OPEN"]),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate_pct": round((len(wins) / max(len(closed), 1)) * 100.0, 2),
+        "total_pnl_pct_sum": round(sum(_num(r.get("pnl_pct")) for r in closed), 4),
+        "early_failure_exits": len(early_exits),
+        "adaptive_take_profit_exits": len(adaptive_wins),
+        "by_exit_reason": by_reason,
+        "worst_trades": sorted(losses, key=lambda r: _num(r.get("pnl_pct")))[:10],
+        "best_trades": sorted(wins, key=lambda r: _num(r.get("pnl_pct")), reverse=True)[:10],
     }

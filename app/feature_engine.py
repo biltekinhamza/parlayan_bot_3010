@@ -177,6 +177,14 @@ class FeatureEngine:
         preview_feature.fake_pump_risk = fake_risk
         preview_feature.parlayan_score = parlayan_score
         preview_feature.wick_body_ratio = wick_body_ratio
+        preview_feature.extra = {
+            "up_volume_ratio": kf.get("up_volume_ratio"),
+            "down_volume_ratio": kf.get("down_volume_ratio"),
+            "directional_volume_delta": kf.get("directional_volume_delta"),
+            "recent_green_bar_ratio": kf.get("recent_green_bar_ratio"),
+            "close_location_score": kf.get("close_location_score"),
+            "directional_volume_score": kf.get("directional_volume_score"),
+        }
 
         previous_snapshot = storage.get_latest_market_snapshot(symbol)
         velocity_metrics = compute_velocity_metrics(preview_feature, previous_snapshot)
@@ -204,6 +212,12 @@ class FeatureEngine:
             extra={
                 "price_change_1h_pct": kf.get("price_change_1h_pct"),
                 "price_change_4h_pct": kf.get("price_change_4h_pct"),
+                "up_volume_ratio": kf.get("up_volume_ratio"),
+                "down_volume_ratio": kf.get("down_volume_ratio"),
+                "directional_volume_delta": kf.get("directional_volume_delta"),
+                "recent_green_bar_ratio": kf.get("recent_green_bar_ratio"),
+                "close_location_score": kf.get("close_location_score"),
+                "directional_volume_score": kf.get("directional_volume_score"),
                 "interval": interval,
                 **velocity_metrics,
                 **professional_metrics,

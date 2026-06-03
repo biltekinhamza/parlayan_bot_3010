@@ -3,7 +3,7 @@ app:
   mode: paper
   port: 3010
   timezone: Europe/Istanbul
-  strategy_version: professional_paper_v42
+  strategy_version: professional_paper_v44
 binance:
   rest_base_url: https://api.binance.com
   request_timeout_seconds: 12
@@ -70,6 +70,12 @@ strategy:
     min_velocity_score_for_entry: 58.0
     min_price_velocity_1m_for_entry: 0.08
     min_momentum_acceleration_for_entry: 0.0
+    min_directional_volume_score_for_entry: 52.0
+    min_up_volume_ratio_for_entry: 0.50
+    directional_filter_volume_ratio_trigger: 1.8
+    min_close_location_for_fast_alarm: 0.48
+    min_directional_volume_score_for_velocity_entry: 55.0
+    min_up_volume_ratio_for_velocity_entry: 0.52
 paper_trading:
   enabled: true
   starting_equity_usdt: 1000
@@ -150,10 +156,33 @@ phase_risk:
     DANGER: 1.2
     DISTRIBUTION: 1.4
 
+follow_through:
+  enabled: true
+  check_after_minutes: 10
+  min_runup_pct: 0.35
+  max_loss_pct: -0.85
+  velocity_score_floor: 18
+  directional_score_floor: 45
+  stale_after_minutes: 24
+  stale_min_runup_pct: 0.75
+
+adaptive_profit:
+  enabled: true
+  min_trend_persistence_score: 66
+  extended_take_profit_pct: 24.0
+  lock_profit_pct: 10.0
+  max_giveback_from_peak_pct: 4.2
+
 research:
   log_decision_rejections: true
   reject_log_min_pre_pump_score: 0
   pump_detective_v2_enabled: true
+  decision_quality_auto_refresh: true
+  decision_quality_hours: 36
+  decision_quality_refresh_limit: 300
+  near_miss_min_upside_pct: 5.0
+  danger_quality_horizon_minutes: 240
+  market_regime_enabled: true
 
 
 fast_alarm:
@@ -178,3 +207,6 @@ smart_trailing_ladder:
   - runup_pct: 15.0
     lock_pct: 10.0
     label: tight_trailing
+
+decision_quality:
+  enabled: true

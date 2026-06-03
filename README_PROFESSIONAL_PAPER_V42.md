@@ -1,4 +1,4 @@
-# Parlayan Bot Professional Paper v4.2
+# Parlayan Bot Professional Paper v4.3
 
 Bu sürüm hâlâ canlı emir göndermez. Amaç: kendimizi kandırmadan, profesyonel seviyede paper-trade araştırması yapmak.
 
