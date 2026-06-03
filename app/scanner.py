@@ -68,6 +68,11 @@ class ScannerService:
             features = await self.feature_engine.build_features()
             storage.insert_market_snapshots(features)
             market_regime = storage.compute_and_store_market_regime(features)
+            regime_name = (market_regime or {}).get("regime") if isinstance(market_regime, dict) else None
+            for feature in features:
+                if feature.extra is None:
+                    feature.extra = {}
+                feature.extra["market_regime"] = regime_name or "NEUTRAL"
             pattern_memory = self.pattern_memory_engine.process_scan(features)
             market_dna_refresh = {}
             if pattern_memory.get("inserted", 0) > 0:
@@ -187,6 +192,9 @@ class ScannerService:
                                 "market_phase": (feature.extra or {}).get("market_phase"),
                                 "v4_profile": (feature.extra or {}).get("v4_profile"),
                                 "entry_profile": result.get("entry_profile"),
+                                "adaptive_dna": result.get("adaptive_dna"),
+                                "discovery": result.get("discovery"),
+                                "position_confidence": result.get("position_confidence"),
                                 "professional_metrics": feature.extra,
                             },
                         )

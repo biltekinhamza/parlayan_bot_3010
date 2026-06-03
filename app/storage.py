@@ -5,7 +5,7 @@ from typing import Any
 
 from .db import db, jsonb
 
-STRATEGY_VERSION = "professional_paper_v45"
+STRATEGY_VERSION = "professional_paper_v461"
 MODE = "paper"
 
 
@@ -773,7 +773,7 @@ def get_winning_pattern_report(all_time: bool = False) -> dict[str, Any]:
 # Amaç: session restart sonrası eski açık pozisyonları riskten düşürmemek,
 # unrealized PnL'i hesaba katmak ve Pump Detective v2 raporlarını üretmek.
 
-STRATEGY_VERSION = "professional_paper_v45"
+STRATEGY_VERSION = "professional_paper_v461"
 
 
 def start_paper_session(config_snapshot: dict[str, Any] | None = None, strategy_version: str = STRATEGY_VERSION) -> dict[str, Any]:
@@ -1140,7 +1140,7 @@ def get_pump_detective_v2_report(threshold_pct: float = 30.0, limit: int = 100) 
 
 # ─── V4.3 Velocity / Paper Integrity Reports ─────────────────────────────────
 
-STRATEGY_VERSION = "professional_paper_v45"
+STRATEGY_VERSION = "professional_paper_v461"
 
 
 def patch_trade_context(trade_id: str, patch: dict[str, Any]) -> None:
@@ -1804,7 +1804,7 @@ def get_v44_trade_quality_report(hours: int = 24, all_time: bool = True) -> dict
     }
 
 
-# ─── V4.5 Pattern Memory / Market DNA ────────────────────────────────────────
+# ─── V4.6 Pattern Memory / Market DNA ────────────────────────────────────────
 
 def _feature_metrics(feature: Any) -> dict[str, Any]:
     extra = getattr(feature, "extra", {}) or {}
@@ -2005,7 +2005,7 @@ def record_pattern_memory_samples(
                         jsonb(before_metrics), jsonb(trigger_metrics), jsonb({}),
                         jsonb({
                             "dedupe_cooldown_minutes": dedupe_cooldown_minutes,
-                            "source": "pattern_memory_engine_v45",
+                            "source": "pattern_memory_engine_v46",
                             "start_snapshot_id": str(before.get("id")),
                         }),
                     ),
@@ -2078,7 +2078,7 @@ def get_pattern_memory_report(hours: int = 72, threshold_pct: float | None = Non
         tuple(params[:-1]),
     )
     return {
-        "version": "pattern_memory_v45",
+        "version": "pattern_memory_v46",
         "hours": hours,
         "threshold_pct": threshold_pct,
         "summary": summary,
@@ -2197,6 +2197,52 @@ def refresh_market_dna_profiles(lookback_days: int = 30, min_samples: int = 8) -
     return {"enabled": True, "profiles_updated": updated, "lookback_days": lookback_days, "min_samples": min_samples}
 
 
+
+def get_best_market_dna_profile(
+    threshold_pct: float = 10,
+    horizon_minutes: int = 240,
+    market_regime: str | None = None,
+    min_samples: int = 8,
+) -> dict[str, Any] | None:
+    """
+    V4.6 decision layer için en güvenilir Market DNA profilini döndürür.
+    Önce istenen regime'i arar; bulamazsa sample/win-rate'e göre en iyi profili kullanır.
+    """
+    params: list[Any] = [threshold_pct, horizon_minutes, min_samples]
+    regime_filter = ""
+    if market_regime:
+        regime_filter = "AND profile_type=%s"
+        params.append(market_regime)
+    row = db.fetch_one(
+        f"""
+        SELECT *
+        FROM market_dna_profiles
+        WHERE threshold_pct=%s
+          AND horizon_minutes=%s
+          AND sample_count >= %s
+          {regime_filter}
+        ORDER BY win_rate DESC, sample_count DESC, updated_at DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    )
+    if row:
+        return dict(row)
+
+    row = db.fetch_one(
+        """
+        SELECT *
+        FROM market_dna_profiles
+        WHERE threshold_pct=%s
+          AND horizon_minutes=%s
+          AND sample_count >= %s
+        ORDER BY win_rate DESC, sample_count DESC, updated_at DESC
+        LIMIT 1
+        """,
+        (threshold_pct, horizon_minutes, min_samples),
+    )
+    return dict(row) if row else None
+
 def get_market_dna_report(limit: int = 100, refresh: bool = False) -> dict[str, Any]:
     refresh_result = {}
     if refresh:
@@ -2211,7 +2257,7 @@ def get_market_dna_report(limit: int = 100, refresh: bool = False) -> dict[str, 
         (limit,),
     )
     return {
-        "version": "market_dna_v45",
+        "version": "market_dna_v46",
         "refresh": refresh_result,
         "profiles": profiles,
     }

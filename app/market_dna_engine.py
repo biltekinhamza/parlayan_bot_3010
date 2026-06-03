@@ -7,7 +7,7 @@ from . import storage
 
 class MarketDNAEngine:
     """
-    V4.5 Market DNA / Self Learning Engine.
+    V4.6 Market DNA / Self Learning Engine.
 
     Pattern Memory olaylarını toplu istatistiğe dönüştürür.
     Strateji kurallarını doğrudan değiştirmez; karar destek katmanı olarak hangi

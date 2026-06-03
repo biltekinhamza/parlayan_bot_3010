@@ -90,10 +90,15 @@ class PaperRiskManager:
         if _f(portfolio_global.get("equity_usdt")) < min_equity:
             return RiskDecision(False, "equity_too_low_including_unrealized", {"portfolio": portfolio_global, "min_equity": min_equity})
 
-        min_pre_pump = _f(self.cfg.get("min_pre_pump_score_for_entry"), 62.0)
+        entry_profile = str(context.get("entry_profile") or "")
+        is_discovery_entry = entry_profile.startswith("DNA_")
+        min_pre_pump = _f(
+            self.cfg.get("min_discovery_pre_pump_score" if is_discovery_entry else "min_pre_pump_score_for_entry"),
+            40.0 if is_discovery_entry else 62.0,
+        )
         pre_pump_score = _f(context.get("pre_pump_score"))
         if pre_pump_score < min_pre_pump:
-            return RiskDecision(False, "pre_pump_score_low", {"pre_pump_score": pre_pump_score, "min": min_pre_pump})
+            return RiskDecision(False, "pre_pump_score_low", {"pre_pump_score": pre_pump_score, "min": min_pre_pump, "entry_profile": entry_profile})
 
         phase = str(context.get("market_phase") or "")
         blocked_phases = set(self.cfg.get("blocked_market_phases", ["FOMO", "LATE_FOMO", "DANGER", "DISTRIBUTION"]))

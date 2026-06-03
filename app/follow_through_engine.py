@@ -14,7 +14,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class FollowThroughEngine:
     """
-    V4.5 Follow Through Engine.
+    V4.6 Follow Through Engine.
 
     Girişten sonra coin hareketi gerçekten devam ediyor mu ölçer.
     Profesyonel trader mantığı: iyi breakout, ilk dakikalarda en azından küçük

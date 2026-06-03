@@ -3,7 +3,7 @@ app:
   mode: paper
   port: 3010
   timezone: Europe/Istanbul
-  strategy_version: professional_paper_v45
+  strategy_version: professional_paper_v461
 binance:
   rest_base_url: https://api.binance.com
   request_timeout_seconds: 12
@@ -71,7 +71,7 @@ strategy:
     min_price_velocity_1m_for_entry: 0.08
     min_momentum_acceleration_for_entry: 0.0
     min_directional_volume_score_for_entry: 52.0
-    min_up_volume_ratio_for_entry: 0.50
+    min_up_volume_ratio_for_entry: 0.5
     directional_filter_volume_ratio_trigger: 1.8
     min_close_location_for_fast_alarm: 0.48
     min_directional_volume_score_for_velocity_entry: 55.0
@@ -80,7 +80,7 @@ paper_trading:
   enabled: true
   starting_equity_usdt: 1000
   default_quote_size_usdt: 75
-  max_open_trades: 4
+  max_open_trades: 5
   max_slippage_pct_estimate: 0.75
   stop_extra_slippage_pct: 0.08
   hard_min_parlayan_score: 42
@@ -101,10 +101,11 @@ paper_trading:
   initial_stop_grace_minutes: 6
   recovery_stop_loss_pct: 4.0
   momentum_stop_loss_pct: 3.0
+  discovery_hard_min_parlayan_score: 10
 risk:
   enabled: true
-  max_open_trades: 4
-  max_total_open_notional_usdt: 320
+  max_open_trades: 5
+  max_total_open_notional_usdt: 340
   max_unrealized_loss_usdt: 22
   max_position_usdt: 100
   daily_max_loss_usdt: 35
@@ -116,15 +117,12 @@ risk:
   - LATE_FOMO
   - DANGER
   - DISTRIBUTION
+  min_discovery_pre_pump_score: 32
 ui:
   refresh_seconds: 10
 storage:
   keep_snapshot_days: 30
-
-
 phase_risk:
-  # V4.1: stop ve grace period artık faza göre değişir.
-  # FOMO/DANGER/DISTRIBUTION için grace yok; erken fazlarda kısa nefes alanı var.
   initial_stop_grace_minutes:
     RECOVERY_COMPRESSION: 6
     VOLUME_WAKEUP: 4
@@ -155,7 +153,6 @@ phase_risk:
     LATE_FOMO: 1.6
     DANGER: 1.2
     DISTRIBUTION: 1.4
-
 follow_through:
   enabled: true
   check_after_minutes: 10
@@ -165,14 +162,12 @@ follow_through:
   directional_score_floor: 45
   stale_after_minutes: 24
   stale_min_runup_pct: 0.75
-
 adaptive_profit:
   enabled: true
   min_trend_persistence_score: 66
   extended_take_profit_pct: 24.0
   lock_profit_pct: 10.0
   max_giveback_from_peak_pct: 4.2
-
 research:
   log_decision_rejections: true
   reject_log_min_pre_pump_score: 0
@@ -183,35 +178,29 @@ research:
   near_miss_min_upside_pct: 5.0
   danger_quality_horizon_minutes: 240
   market_regime_enabled: true
-
-
 fast_alarm:
   enabled: true
   min_fast_alarm_score: 65
   min_warning_score: 80
   alert_event_type: FAST_PUMP_ALERT
-
 smart_trailing_ladder:
-  - runup_pct: 3.5
-    lock_pct: 0.0
-    label: break_even
-  - runup_pct: 5.0
-    lock_pct: 2.0
-    label: lock_2
-  - runup_pct: 8.0
-    lock_pct: 4.0
-    label: lock_4
-  - runup_pct: 12.0
-    lock_pct: 7.0
-    label: lock_7
-  - runup_pct: 15.0
-    lock_pct: 10.0
-    label: tight_trailing
-
+- runup_pct: 3.5
+  lock_pct: 0.0
+  label: break_even
+- runup_pct: 5.0
+  lock_pct: 2.0
+  label: lock_2
+- runup_pct: 8.0
+  lock_pct: 4.0
+  label: lock_4
+- runup_pct: 12.0
+  lock_pct: 7.0
+  label: lock_7
+- runup_pct: 15.0
+  lock_pct: 10.0
+  label: tight_trailing
 decision_quality:
   enabled: true
-
-
 immediate_failure_exit:
   enabled: true
   check_after_minutes: 3
@@ -220,7 +209,6 @@ immediate_failure_exit:
   min_velocity_score: 12
   min_directional_score: 40
   min_up_volume_ratio: 0.46
-
 pattern_memory:
   enabled: true
   thresholds_pct:
@@ -236,8 +224,150 @@ pattern_memory:
   - 240
   dedupe_cooldown_minutes: 180
   max_features_per_scan: 240
-
 market_dna:
   enabled: true
   lookback_days: 30
   min_samples: 8
+adaptive_dna_thresholds:
+  enabled: true
+  target_threshold_pct: 10
+  target_horizon_minutes: 240
+  min_samples: 8
+  min_win_rate: 55
+  volume_floor: 0.58
+  volume_ceiling: 0.75
+  velocity_floor: 18.0
+  velocity_ceiling: 58.0
+  directional_floor: 38.0
+  directional_ceiling: 52.0
+  parlayan_floor: 28.0
+  parlayan_ceiling: 42.0
+  pre_pump_floor: 50.0
+  pre_pump_ceiling: 62.0
+  parlayan_score_multiplier: 1.1
+  pre_pump_multiplier: 0.95
+  full_weight_samples: 50
+  max_low_sample_influence: 0.25
+  max_influence: 0.85
+discovery_entry:
+  enabled: true
+  allowed_phases:
+  - RECOVERY_COMPRESSION
+  - VOLUME_WAKEUP
+  - EARLY_MOMENTUM
+  - ACCUMULATION_BREAKOUT
+  - MOMENTUM_EXPANSION
+  blocked_phases:
+  - FOMO
+  - LATE_FOMO
+  - DANGER
+  - DISTRIBUTION
+  max_24h_change_pct: 28.0
+  max_fake_pump_risk: 78.0
+  max_spread_pct: 0.45
+  rsi_min: 42.0
+  rsi_max: 74.0
+  min_volume_ratio: 0.45
+  min_directional_volume_score: 50.0
+  directional_soft_floor: 48.0
+  up_volume_soft_floor: 0.5
+  min_parlayan_score: 12.0
+  min_pre_pump_score: 45.0
+  velocity_soft_floor: 12.0
+  fast_alarm_soft_floor: 18.0
+  min_5m_change_pct: -0.15
+  min_15m_change_pct: -0.2
+  min_score_delta: 1.0
+  min_momentum_acceleration: 0.02
+  min_close_location_score: 0.38
+  strong_pre_pump_score: 70.0
+  strong_directional_score: 72.0
+  strong_velocity_score: 35.0
+  strong_volume_ratio: 3.0
+  min_points: 5
+position_sizing:
+  enabled: true
+  default_multiplier: 0.5
+  min_multiplier: 0.2
+  max_multiplier: 1.0
+  min_confidence_multiplier: 0.6
+  max_discovery_multiplier: 0.35
+  min_quote_size_usdt: 15.0
+  max_quote_size_usdt: 100.0
+  boost_pre_pump_score: 82.0
+  boost_directional_score: 75.0
+  high_quality_boost: 0.1
+  velocity_boost_score: 55.0
+  volume_boost_ratio: 2.0
+  velocity_volume_boost: 0.1
+  profile_multipliers:
+    DNA_DISCOVERY_ENTRY: 0.25
+    DNA_RECOVERY_SCOUT: 0.25
+    DNA_WAKEUP_SCOUT: 0.3
+    DNA_MOMENTUM_SCOUT: 0.35
+    RECOVERY_ENTRY: 0.55
+    VOLUME_WAKEUP_ENTRY: 0.6
+    MOMENTUM_ENTRY: 0.75
+    VELOCITY_ALARM_ENTRY: 0.9
+stable_asset_filter:
+  enabled: true
+  stable_base_assets:
+  - USDE
+  - USDC
+  - FDUSD
+  - TUSD
+  - USDP
+  - DAI
+  - BUSD
+  - USDD
+  - USDJ
+  - USD1
+  - PYUSD
+  - RLUSD
+  - AEUR
+  - EUR
+  - EURC
+  - EURI
+  - PAX
+  - PAXG
+  - GUSD
+  - SUSD
+  - LUSD
+  - FRAX
+  - USDS
+  - USDX
+  - XUSD
+  - USDL
+  blocked_symbols:
+  - USDEUSDT
+  - USDCUSDT
+  - FDUSDUSDT
+  - TUSDUSDT
+  - USDPUSDT
+  - DAIUSDT
+  - BUSDUSDT
+  - USDDUSDT
+  - USDJUSDT
+  - USD1USDT
+  - PYUSDUSDT
+  - RLUSDUSDT
+  - AEURUSDT
+  - EURUSDT
+  - EURCUSDT
+  - EURIUSDT
+  - PAXUSDT
+  - PAXGUSDT
+  - GUSDUSDT
+  - SUSDUSDT
+  - LUSDUSDT
+  - FRAXUSDT
+  - USDSUSDT
+  - USDXUSDT
+  - XUSDUSDT
+  - USDLUSDT
+discovery_guard:
+  enabled: true
+  min_abs_24h_change_pct: 0.75
+  min_abs_5m_change_pct: 0.03
+  min_directional_volume_score: 42.0
+  min_up_volume_ratio: 0.25

@@ -14,7 +14,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class AdaptiveProfitEngine:
     """
-    V4.5 Adaptive Profit Engine.
+    V4.6 Adaptive Profit Engine.
 
     Sabit take-profit iyi trendleri erken öldürmesin diye trend persistence ölçer.
     Trend güçlü ise hedef uzatılır; aynı anda kâr koruma stopu yukarı taşınır.

@@ -294,7 +294,7 @@ def get_v44_quality_report(hours: int = 24, all_time: bool = True):
 
 
 
-# ─── V4.5 Pattern Memory / Market DNA ────────────────────────────────────────
+# ─── V4.6 Pattern Memory / Market DNA ────────────────────────────────────────
 
 @router.get("/api/research/pattern-memory")
 def get_pattern_memory(hours: int = 72, threshold_pct: float | None = None, limit: int = 100):
@@ -346,3 +346,34 @@ def reports_pattern_memory(hours: int = 72, threshold_pct: float | None = None, 
 @router.get("/api/reports/market-dna")
 def reports_market_dna(limit: int = 100, refresh: bool = False):
     return storage.get_market_dna_report(limit=limit, refresh=refresh)
+
+
+@router.get("/api/reports/adaptive-dna")
+def reports_adaptive_dna():
+    from .adaptive_dna_thresholds import AdaptiveDNAThresholds
+    cfg = config_store.get()
+    parlayan_cfg = cfg.get("strategy", {}).get("parlayan", {})
+    base = {
+        "min_volume_ratio": float(parlayan_cfg.get("min_volume_ratio_for_entry", 0.75)),
+        "min_velocity_score": float(parlayan_cfg.get("min_velocity_score_for_entry", 58.0)),
+        "min_directional_volume_score": float(parlayan_cfg.get("min_directional_volume_score_for_entry", 52.0)),
+        "min_parlayan_score": float(parlayan_cfg.get("min_parlayan_score_for_entry", 48.0)),
+        "min_pre_pump_score": float(parlayan_cfg.get("min_pre_pump_score_for_entry", 64.0)),
+    }
+    return {
+        "version": "adaptive_dna_thresholds_v46",
+        "base": base,
+        "resolved": AdaptiveDNAThresholds(cfg).resolve(base, "NEUTRAL").as_dict(),
+    }
+
+
+@router.get("/api/reports/stable-filter")
+def reports_stable_filter():
+    from .stable_asset_filter import get_stable_base_assets, get_blocked_symbols
+    cfg = config_store.get()
+    return {
+        "version": "stable_asset_filter_v461",
+        "enabled": bool(cfg.get("stable_asset_filter", {}).get("enabled", True)),
+        "stable_base_assets": sorted(get_stable_base_assets(cfg)),
+        "blocked_symbols": sorted(get_blocked_symbols(cfg)),
+    }

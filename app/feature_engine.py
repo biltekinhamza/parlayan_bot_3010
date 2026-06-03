@@ -8,6 +8,7 @@ from .binance_client import BinancePublicClient
 from .indicators import clamp, kline_features, safe_float, spread_pct_from_book
 from .models import MarketFeature, SymbolInfo
 from . import storage
+from .stable_asset_filter import evaluate_symbol
 from .professional_metrics import compute_pre_pump_metrics
 from .velocity_engine import compute_velocity_metrics
 
@@ -37,6 +38,9 @@ class FeatureEngine:
             symbol = item.get("symbol", "")
             base = item.get("baseAsset", "")
             if item.get("quoteAsset") != quote:
+                continue
+            stable_decision = evaluate_symbol(symbol, self.config, base_asset=base, quote_asset=item.get("quoteAsset", ""))
+            if stable_decision.blocked:
                 continue
             if base in exclude_bases:
                 continue

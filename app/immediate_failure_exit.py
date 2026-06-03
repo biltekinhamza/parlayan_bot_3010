@@ -14,7 +14,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class ImmediateFailureExit:
     """
-    V4.5 Immediate Failure Exit.
+    V4.6 Immediate Failure Exit.
 
     Follow-through kontrolünden daha erken, bariz başarısız breakoutları öldürür.
     Amaç stop-loss beklemek değil, çalışan hareket ile çalışmayan hareketi hızlı ayırmaktır.

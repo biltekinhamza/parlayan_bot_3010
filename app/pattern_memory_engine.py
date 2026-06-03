@@ -7,7 +7,7 @@ from . import storage
 
 class PatternMemoryEngine:
     """
-    V4.5 Pattern Memory Engine.
+    V4.6 Pattern Memory Engine.
 
     Her scan'de coin lifecycle olaylarını yakalar:
     - Hangi coin hangi zaman penceresinde +10/+20/+30/+50/+100 yaptı?

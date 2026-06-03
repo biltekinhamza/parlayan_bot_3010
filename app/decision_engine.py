@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from .models import MarketFeature
+from .adaptive_dna_thresholds import AdaptiveDNAThresholds
+from .discovery_entry_engine import DiscoveryEntryEngine
+from .stable_asset_filter import evaluate_symbol
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -28,6 +31,8 @@ class DecisionEngine:
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
+        self.adaptive_dna = AdaptiveDNAThresholds(config)
+        self.discovery_entry = DiscoveryEntryEngine(config)
 
     def decide(
         self,
@@ -39,6 +44,15 @@ class DecisionEngine:
         parlayan_cfg = cfg["parlayan"]
 
         reasons: list[str] = []
+
+        stable_decision = evaluate_symbol(feature.symbol, self.config)
+        if stable_decision.blocked:
+            return {
+                "action": "STABLE_ASSET_BLOCK",
+                "reasons": [stable_decision.reason],
+                "entry_ok": False,
+                "stable_asset_filter": stable_decision.as_dict(),
+            }
 
         if in_cooldown:
             return {"action": "COOLDOWN", "reasons": ["sembol geçici olarak beklemede"], "entry_ok": False}
@@ -63,6 +77,16 @@ class DecisionEngine:
         directional_volume_score = _f(extra.get("directional_volume_score"), 50.0)
         up_volume_ratio = _f(extra.get("up_volume_ratio"), 0.5)
         close_location_score = _f(extra.get("close_location_score"), 0.5)
+
+        base_thresholds = {
+            "min_volume_ratio": _f(parlayan_cfg.get("min_volume_ratio_for_entry"), 0.75),
+            "min_velocity_score": _f(parlayan_cfg.get("min_velocity_score_for_entry"), 58.0),
+            "min_directional_volume_score": _f(parlayan_cfg.get("min_directional_volume_score_for_entry"), 52.0),
+            "min_parlayan_score": _f(parlayan_cfg.get("min_parlayan_score_for_entry"), 48.0),
+            "min_pre_pump_score": _f(parlayan_cfg.get("min_pre_pump_score_for_entry"), 64.0),
+        }
+        adaptive_thresholds = self.adaptive_dna.resolve(base_thresholds, str(extra.get("market_regime") or "NEUTRAL"))
+        adaptive_details = adaptive_thresholds.as_dict()
 
         blocked_entry_phases = {"FOMO", "LATE_FOMO", "DANGER", "DISTRIBUTION"}
         watchable_phases = {
@@ -115,7 +139,7 @@ class DecisionEngine:
         min_24h_entry = _f(parlayan_cfg.get("min_24h_change_pct_for_entry"), 4.0)
         max_24h_entry = _f(parlayan_cfg.get("max_24h_change_pct_for_entry"), 30.0)
         hard_24h_block = _f(parlayan_cfg.get("hard_fomo_24h_block_pct"), 35.0)
-        min_volume_entry = _f(parlayan_cfg.get("min_volume_ratio_for_entry"), 0.75)
+        min_volume_entry = adaptive_thresholds.min_volume_ratio if adaptive_thresholds.enabled else _f(parlayan_cfg.get("min_volume_ratio_for_entry"), 0.75)
         min_5m_entry = _f(parlayan_cfg.get("min_5m_change_for_entry"), 0.0)
         min_15m_entry = _f(parlayan_cfg.get("min_15m_change_for_entry"), 0.25)
 
@@ -136,7 +160,7 @@ class DecisionEngine:
         if feature.fake_pump_risk > _f(parlayan_cfg.get("max_fake_pump_risk_for_entry"), 72):
             entry_reasons.append(f"fake pump riski yüksek: {feature.fake_pump_risk:.1f}")
 
-        min_directional_score = _f(parlayan_cfg.get("min_directional_volume_score_for_entry"), 52.0)
+        min_directional_score = adaptive_thresholds.min_directional_volume_score if adaptive_thresholds.enabled else _f(parlayan_cfg.get("min_directional_volume_score_for_entry"), 52.0)
         min_up_volume_ratio = _f(parlayan_cfg.get("min_up_volume_ratio_for_entry"), 0.50)
         if volume_ratio >= _f(parlayan_cfg.get("directional_filter_volume_ratio_trigger"), 1.8):
             if directional_volume_score < min_directional_score or up_volume_ratio < min_up_volume_ratio:
@@ -211,15 +235,36 @@ class DecisionEngine:
             )
 
         if entry_reasons:
+            discovery = self.discovery_entry.evaluate(feature, adaptive_details, has_open_trade=has_open_trade)
+            # V4.6: Eğer klasik confirmation profili oluşmadıysa ama DNA destekli
+            # erken keşif profili oluştuysa küçük pozisyonlu discovery entry üret.
+            if discovery.allowed:
+                return {
+                    "action": "PARLAYAN_ENTRY",
+                    "reasons": discovery.reasons,
+                    "entry_ok": True,
+                    "entry_profile": discovery.entry_profile,
+                    "parlayan_score": feature.parlayan_score,
+                    "pre_pump_score": pre_pump_score,
+                    "market_phase": market_phase,
+                    "v4_profile": v4_profile,
+                    "change_24h": change_24h,
+                    "adaptive_dna": adaptive_details,
+                    "discovery": discovery.as_dict(),
+                    "position_confidence": discovery.confidence,
+                }
+
             return {
                 "action": "PARLAYAN_WATCH",
-                "reasons": [f"watch: {r}" for r in entry_reasons],
+                "reasons": [f"watch: {r}" for r in entry_reasons] + [f"watch: {r}" for r in discovery.reasons],
                 "entry_ok": False,
                 "parlayan_score": feature.parlayan_score,
                 "pre_pump_score": pre_pump_score,
                 "market_phase": market_phase,
                 "v4_profile": v4_profile,
                 "change_24h": change_24h,
+                "adaptive_dna": adaptive_details,
+                "discovery": discovery.as_dict(),
             }
 
         entry_profile = (
@@ -254,4 +299,6 @@ class DecisionEngine:
             "market_phase": market_phase,
             "v4_profile": v4_profile,
             "change_24h": change_24h,
+            "adaptive_dna": adaptive_details,
+            "position_confidence": 1.0,
         }

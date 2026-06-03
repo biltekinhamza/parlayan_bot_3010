@@ -8,6 +8,7 @@ from .risk_manager import PaperRiskManager
 from .adaptive_profit_engine import AdaptiveProfitEngine
 from .follow_through_engine import FollowThroughEngine
 from .immediate_failure_exit import ImmediateFailureExit
+from .position_sizing_engine import PositionSizingEngine
 
 
 def _f(value: Any, default: float = 0.0) -> float:
@@ -21,7 +22,7 @@ def _f(value: Any, default: float = 0.0) -> float:
 
 class TradeEngine:
     """
-    Professional paper trade engine v4.5.
+    Professional paper trade engine v4.6.
 
     Bu motor hâlâ gerçek emir göndermez. Amacı kendimizi kandırmayan paper-trade:
     - Eski session açık pozisyonları global riskte izler.
@@ -37,6 +38,7 @@ class TradeEngine:
         self.follow_through_engine = FollowThroughEngine(config)
         self.immediate_failure_exit = ImmediateFailureExit(config)
         self.adaptive_profit_engine = AdaptiveProfitEngine(config)
+        self.position_sizing_engine = PositionSizingEngine(config)
 
     @property
     def cfg(self) -> dict[str, Any]:
@@ -56,9 +58,13 @@ class TradeEngine:
             return None
 
         parlayan_score = _f(context.get("parlayan_score"))
+        entry_profile = str(context.get("entry_profile") or "")
+        is_discovery_entry = entry_profile.startswith("DNA_")
         hard_min_score = _f(cfg.get("hard_min_parlayan_score"), 45)
-        if parlayan_score < hard_min_score:
-            self._reject(symbol, "hard_min_parlayan_score", price, context, {"parlayan_score": parlayan_score, "min": hard_min_score})
+        discovery_hard_min = _f(cfg.get("discovery_hard_min_parlayan_score"), 10)
+        effective_min_score = discovery_hard_min if is_discovery_entry else hard_min_score
+        if parlayan_score < effective_min_score:
+            self._reject(symbol, "hard_min_parlayan_score", price, context, {"parlayan_score": parlayan_score, "min": effective_min_score, "entry_profile": entry_profile})
             return None
 
         # V4.1: current session değil, tüm session açık pozisyonları global riskte say.
@@ -81,7 +87,12 @@ class TradeEngine:
             self._reject(symbol, "recent_entry_limit_global", price, context, {"recent_entries_12h": recent, "max": max_entries})
             return None
 
-        quote_size = _f(cfg.get("default_quote_size_usdt"), 100)
+        base_quote_size = _f(cfg.get("default_quote_size_usdt"), 100)
+        size_decision = self.position_sizing_engine.size(base_quote_size, context)
+        quote_size = size_decision.quote_size
+        context = dict(context or {})
+        context["position_sizing"] = size_decision.as_dict()
+        context["quote_size_usdt"] = quote_size
 
         risk_decision = self.risk_manager.evaluate_new_position(symbol, quote_size, context)
         if not risk_decision.allowed:
@@ -101,7 +112,7 @@ class TradeEngine:
         enriched_context.update({
             "raw_signal_price": price,
             "entry_fill_price": entry_fill_price,
-            "execution_model": "adverse_slippage_v4_4",
+            "execution_model": "adverse_slippage_v4_6",
             "slippage_details": slippage_details,
         })
 
